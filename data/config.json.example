@@ -1,0 +1,55 @@
+{
+  "_comment": "Main configuration for piixident. Copy this file to config.json and edit to match your setup.",
+  "compositor": "niri",
+  "paths": {
+    "scripts": "~/.config/piixident/scripts",
+    "cache": "~/.cache/piixident",
+    "wallpaper": "~/wallpaper",
+    "steamWorkshop": "~/.local/share/Steam/steamapps/workshop/content/431960",
+    "steamWeAssets": "~/.local/share/Steam/steamapps/common/wallpaper_engine/assets",
+    "steam": "~/.local/share/Steam"
+  },
+  "monitor": "DP-1",
+  "location": {
+    "city": "YOUR_CITY",
+    "timezone": ""
+  },
+  "network": {
+    "wifiInterface": "wlan0"
+  },
+  "ollama": {
+    "url": "http://localhost:11434",
+    "model": "gemma3:4b",
+    "vramReclaimModel": "gemma3:27b"
+  },
+  "matugen": {
+    "schemeType": "scheme-fidelity",
+    "kdeColorScheme": "PiixidentMatugen"
+  },
+  "intervals": {
+    "weatherPollMs": 600000,
+    "wifiPollMs": 10000,
+    "smartHomePollMs": 5000,
+    "ollamaStatusPollMs": 5000,
+    "notificationExpireMs": 8000,
+    "systemStatsFastSec": 3,
+    "systemStatsSlowSec": 30
+  },
+  "components": {
+    "bar": true,
+    "lockscreen": true,
+    "appLauncher": true,
+    "wallpaperSelector": true,
+    "windowSwitcher": true,
+    "workspaceSwitcher": true,
+    "powerMenu": true,
+    "smartHome": true,
+    "notifications": true,
+    "weather": true,
+    "wifi": true,
+    "bluetooth": true,
+    "volume": true,
+    "calendar": true,
+    "lyrics": true
+  }
+}

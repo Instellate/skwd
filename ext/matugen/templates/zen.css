@@ -1,0 +1,133 @@
+
+
+/* Matugen template: Zen browser userChrome.css from wallpaper */
+:root {
+
+    --zen-colors-primary: {{colors.primary.default.hex}} !important;
+    --zen-colors-secondary: {{colors.secondary.default.hex}} !important;
+    --zen-colors-tertiary: {{colors.tertiary.default.hex}} !important;
+    --zen-colors-border: {{colors.outline_variant.default.hex}} !important;
+
+
+    --matugen-bg: {{colors.surface.default.hex}};
+    --matugen-bg-dim: {{colors.surface_dim.default.hex}};
+    --matugen-bg-container: {{colors.surface_container.default.hex}};
+    --matugen-bg-container-low: {{colors.surface_container_low.default.hex}};
+    --matugen-bg-container-high: {{colors.surface_container_high.default.hex}};
+    --matugen-fg: {{colors.on_surface.default.hex}};
+    --matugen-fg-dim: {{colors.on_surface_variant.default.hex}};
+    --matugen-primary: {{colors.primary.default.hex}};
+    --matugen-on-primary: {{colors.on_primary.default.hex}};
+    --matugen-primary-container: {{colors.primary_container.default.hex}};
+    --matugen-secondary: {{colors.secondary.default.hex}};
+    --matugen-accent: {{colors.tertiary.default.hex}};
+    --matugen-border: {{colors.outline_variant.default.hex}};
+
+
+    --toolbar-bgcolor: var(--matugen-bg) !important;
+    --lwt-accent-color: var(--matugen-bg) !important;
+    --lwt-text-color: var(--matugen-fg) !important;
+    --arrowpanel-background: var(--matugen-bg-container) !important;
+    --arrowpanel-color: var(--matugen-fg) !important;
+    --arrowpanel-border-color: var(--matugen-border) !important;
+    --urlbar-box-bgcolor: var(--matugen-bg-container) !important;
+    --urlbar-box-focus-bgcolor: var(--matugen-bg-container-high) !important;
+    --sidebar-background-color: var(--matugen-bg) !important;
+    --sidebar-text-color: var(--matugen-fg) !important;
+}
+
+
+#zen-sidebar-web-panel,
+#zen-sidebar-panels-wrapper {
+    background: var(--matugen-bg) !important;
+}
+
+
+#zen-tabbox-wrapper,
+#tabbrowser-tabbox {
+    background: var(--matugen-bg) !important;
+}
+
+
+.tabbrowser-tab .tab-background {
+    background: var(--matugen-bg-container-low) !important;
+}
+
+.tabbrowser-tab[selected="true"] .tab-background {
+    background: var(--matugen-primary-container) !important;
+}
+
+.tabbrowser-tab:hover:not([selected="true"]) .tab-background {
+    background: var(--matugen-bg-container) !important;
+}
+
+
+.tabbrowser-tab .tab-label {
+    color: var(--matugen-fg) !important;
+}
+
+
+#urlbar-background {
+    background: var(--matugen-bg-container) !important;
+    border: 1px solid var(--matugen-border) !important;
+}
+
+#urlbar[focused="true"] #urlbar-background {
+    border-color: var(--matugen-primary) !important;
+    box-shadow: 0 0 0 1px var(--matugen-primary) !important;
+}
+
+#urlbar-input {
+    color: var(--matugen-fg) !important;
+}
+
+
+#nav-bar {
+    background: var(--matugen-bg) !important;
+}
+
+
+#nav-bar toolbarbutton {
+    color: var(--matugen-fg) !important;
+}
+
+#nav-bar toolbarbutton:hover {
+    background: var(--matugen-bg-container) !important;
+}
+
+
+#PersonalToolbar {
+    background: var(--matugen-bg) !important;
+}
+
+
+findbar {
+    background: var(--matugen-bg-container) !important;
+    color: var(--matugen-fg) !important;
+    border-top: 1px solid var(--matugen-border) !important;
+}
+
+
+panel[type="arrow"],
+.panel-arrowcontent {
+    background: var(--matugen-bg-container) !important;
+    color: var(--matugen-fg) !important;
+    border-color: var(--matugen-border) !important;
+}
+
+
+menupopup {
+    --panel-background: var(--matugen-bg-container) !important;
+    --panel-color: var(--matugen-fg) !important;
+    --panel-border-color: var(--matugen-border) !important;
+}
+
+menuitem:hover,
+menu:hover {
+    background: var(--matugen-primary-container) !important;
+}
+
+
+* {
+    scrollbar-color: var(--matugen-primary) var(--matugen-bg-container) !important;
+}

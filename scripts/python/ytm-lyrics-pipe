@@ -1,0 +1,339 @@
+#!/usr/bin/env python3
+"""
+mayytm-lyrics-pipe — Fetches synced lyrics (with word-level timing when available).
+
+Output format:
+  - On track change: JSON line with lyrics data:
+    {"lines":[{"text":"...","start":1820,"end":3370,"words":[{"word":"hello","start":1820,"end":2100},...]},...]}}
+  - On track end/stop: CLEAR
+
+QML reads the JSON once per track and uses wall-clock interpolation to drive the sweep.
+"""
+
+# Imports
+import sys
+import os
+import time
+import json
+import signal
+import subprocess
+import re
+import unicodedata
+from pathlib import Path
+
+# Inject venv site-packages for syncedlyrics dependency
+import glob
+SCRIPT_DIR = Path(__file__).resolve().parent
+_venv_sites = glob.glob(str(SCRIPT_DIR.parent / ".venv/lib/python3.*/site-packages"))
+if _venv_sites:
+    sys.path.insert(0, _venv_sites[0])
+
+# Lyrics cache directory
+CACHE_DIR = Path.home() / ".cache" / "ytm-lyrics"
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+import syncedlyrics
+import requests
+
+# lrclib.net API constants
+LRCLIB_API = "https://lrclib.net/api"
+LRCLIB_HEADERS = {"User-Agent": "piixident-lyrics/1.0 (https://github.com)"}
+
+
+def log(msg):
+    print(f"[ytm-lyrics] {msg}", file=sys.stderr, flush=True)
+
+
+# Lrclib exact match API
+def lrclib_get_lyrics(artist, title):
+    """Try lrclib.net exact match API. Returns (lrc_text, is_enhanced) or (None, False)."""
+    try:
+        resp = requests.get(
+            f"{LRCLIB_API}/get",
+            params={"artist_name": artist, "track_name": title},
+            headers=LRCLIB_HEADERS,
+            timeout=5,
+        )
+        if resp.status_code != 200:
+            return None, False
+        data = resp.json()
+        synced = data.get("syncedLyrics")
+        if synced:
+            log(f"lrclib.net: got synced lyrics (exact match)")
+            return synced, False
+        return None, False
+    except Exception as e:
+        log(f"lrclib.net error: {e}")
+        return None, False
+
+
+# Lrclib search API fallback
+def lrclib_search_lyrics(artist, title):
+    """Try lrclib.net search API as fallback. Returns (lrc_text, is_enhanced) or (None, False)."""
+    try:
+        resp = requests.get(
+            f"{LRCLIB_API}/search",
+            params={"q": f"{artist} {title}"},
+            headers=LRCLIB_HEADERS,
+            timeout=5,
+        )
+        if resp.status_code != 200:
+            return None, False
+        results = resp.json()
+        for entry in results:
+            synced = entry.get("syncedLyrics")
+            if synced:
+                log(f"lrclib.net: got synced lyrics (search)")
+                return synced, False
+        return None, False
+    except Exception as e:
+        log(f"lrclib.net search error: {e}")
+        return None, False
+
+
+# LRC timestamp to milliseconds conversion
+def ts_to_ms(ts_str):
+    """Convert LRC timestamp like '01:23.45' to milliseconds."""
+    try:
+        ts_str = ts_str.strip()
+        parts = ts_str.split(":")
+        if len(parts) == 2:
+            minutes = int(parts[0])
+            seconds = float(parts[1])
+            return int((minutes * 60 + seconds) * 1000)
+    except Exception:
+        pass
+    return 0
+
+
+# Parse word-level enhanced LRC timestamps
+def parse_enhanced_lrc(lrc_text):
+    """Parse enhanced LRC with word-level timestamps.
+
+    Format: [MM:SS.xx] <MM:SS.xx> word1 <MM:SS.xx> word2 ...
+    Returns list of {text, start, end, words: [{word, start, end}, ...]}
+    """
+    lines = []
+    for raw_line in lrc_text.strip().split("\n"):
+        raw_line = raw_line.strip()
+        if not raw_line:
+            continue
+
+        line_match = re.match(r'\[(\d+:\d+\.\d+)\]\s*(.*)', raw_line)
+        if not line_match:
+            continue
+
+        line_start = ts_to_ms(line_match.group(1))
+        rest = line_match.group(2).strip()
+
+        if not rest:
+            continue
+
+        word_pattern = re.findall(r'<(\d+:\d+\.\d+)>\s*([^<]*)', rest)
+
+        if word_pattern:
+            words = []
+            for i, (ts, word_text) in enumerate(word_pattern):
+                word_text = word_text.strip()
+                if not word_text:
+                    continue
+                w_start = ts_to_ms(ts)
+                if i + 1 < len(word_pattern):
+                    w_end = ts_to_ms(word_pattern[i + 1][0])
+                else:
+                    w_end = w_start + max(200, len(word_text) * 80)
+                words.append({"word": word_text, "start": w_start, "end": w_end})
+
+            if words:
+                full_text = " ".join(w["word"] for w in words)
+                line_end = words[-1]["end"]
+                lines.append({
+                    "text": full_text,
+                    "start": line_start,
+                    "end": line_end,
+                    "words": words,
+                })
+        else:
+            lines.append({
+                "text": rest,
+                "start": line_start,
+                "end": line_start + 3000,
+                "words": [],
+            })
+
+    for i in range(len(lines) - 1):
+        if not lines[i]["words"]:
+            lines[i]["end"] = lines[i + 1]["start"]
+        if lines[i]["words"]:
+            lines[i]["words"][-1]["end"] = lines[i + 1]["start"]
+            lines[i]["end"] = lines[i + 1]["start"]
+
+    return lines
+
+
+# Parse line-level standard LRC timestamps
+def parse_regular_lrc(lrc_text):
+    """Parse regular LRC with line-level timestamps only.
+
+    Format: [MM:SS.xx] text
+    Returns list of {text, start, end, words: []}
+    """
+    lines = []
+    for raw_line in lrc_text.strip().split("\n"):
+        raw_line = raw_line.strip()
+        match = re.match(r'\[(\d+:\d+\.\d+)\]\s*(.*)', raw_line)
+        if not match:
+            continue
+        start = ts_to_ms(match.group(1))
+        text = match.group(2).strip()
+        if not text:
+            continue
+        lines.append({"text": text, "start": start, "end": start + 3000, "words": []})
+
+    for i in range(len(lines) - 1):
+        lines[i]["end"] = lines[i + 1]["start"]
+
+    return lines
+
+
+# Generate filesystem-safe cache path from track info
+def cache_key(artist, title):
+    safe = re.sub(r'[^\w\-]', '_', f"{artist}_{title}".lower())
+    return CACHE_DIR / f"{safe}.json"
+
+
+# Cascading lyrics lookup: cache, syncedlyrics enhanced, lrclib, regular
+def get_lyrics_for_track(artist, title):
+    """Get lyrics with caching. Order: syncedlyrics enhanced → lrclib exact → lrclib search → syncedlyrics regular."""
+    cfile = cache_key(artist, title)
+
+    if cfile.exists():
+        try:
+            with open(cfile) as f:
+                cached = json.load(f)
+            if cached.get("lines"):
+                return cached["lines"], cached.get("enhanced", False)
+        except Exception:
+            pass
+
+    lines = None
+    enhanced = False
+    query = f"{artist} {title}"
+
+    try:
+        result = syncedlyrics.search(query, enhanced=True)
+        if result and "<" in result:
+            lines = parse_enhanced_lrc(result)
+            enhanced = True
+            log(f"Got enhanced (word-level) lyrics")
+    except Exception as e:
+        log(f"Enhanced lyrics error: {e}")
+
+    if not lines:
+        lrc_text, _ = lrclib_get_lyrics(artist, title)
+        if lrc_text:
+            lines = parse_regular_lrc(lrc_text)
+            log(f"Got lrclib.net exact match lyrics")
+
+    if not lines:
+        lrc_text, _ = lrclib_search_lyrics(artist, title)
+        if lrc_text:
+            lines = parse_regular_lrc(lrc_text)
+            log(f"Got lrclib.net search lyrics")
+
+    if not lines:
+        try:
+            result = syncedlyrics.search(query)
+            if result:
+                lines = parse_regular_lrc(result)
+                log(f"Got regular (line-level) lyrics")
+        except Exception as e:
+            log(f"Regular lyrics error: {e}")
+
+    if lines:
+        try:
+            with open(cfile, "w") as f:
+                json.dump({"enhanced": enhanced, "lines": lines}, f, ensure_ascii=False)
+        except Exception:
+            pass
+
+    return lines, enhanced
+
+
+# Query playerctl for current track metadata
+def get_mpris_metadata():
+    try:
+        cmd = ["playerctl", "metadata", "--format",
+               "{{playerName}}|||{{artist}}|||{{title}}|||{{status}}"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
+        if result.returncode != 0:
+            return None
+        parts = result.stdout.strip().split("|||")
+        if len(parts) < 4:
+            return None
+        return {
+            "player": parts[0], "artist": parts[1],
+            "title": parts[2], "status": parts[3],
+        }
+    except Exception:
+        return None
+
+
+# Main polling loop: detect track changes via MPRIS, fetch and output lyrics
+def main():
+
+    prev_track_key = None
+
+    while True:
+        try:
+            meta = get_mpris_metadata()
+
+            if not meta or meta.get("status") != "Playing":
+                if prev_track_key is not None:
+                    print("CLEAR", flush=True)
+                    prev_track_key = None
+                time.sleep(1)
+                continue
+
+            artist = meta["artist"]
+            title = meta["title"]
+            if artist and title.lower().startswith(artist.lower() + " - "):
+                title = title[len(artist) + 3:]
+            track_key = f"{artist}|||{title}"
+
+            if track_key == prev_track_key:
+                time.sleep(1)
+                continue
+
+            prev_track_key = track_key
+            log(f"Now playing: {artist} — {title}")
+
+            print("SEARCHING", flush=True)
+
+            lines, enhanced = get_lyrics_for_track(artist, title)
+
+            if lines:
+                log(f"Sending {len(lines)} lines ({'enhanced' if enhanced else 'regular'})")
+                print(json.dumps({"lines": lines, "enhanced": enhanced}, ensure_ascii=False), flush=True)
+            else:
+                log(f"No lyrics found")
+                print("NOLYRICS", flush=True)
+
+            while True:
+                time.sleep(2)
+                m = get_mpris_metadata()
+                if not m or f"{m['artist']}|||{m['title']}" != track_key or m.get("status") != "Playing":
+                    prev_track_key = None
+                    print("CLEAR", flush=True)
+                    break
+
+        except KeyboardInterrupt:
+            break
+        except Exception as e:
+            log(f"Error: {e}")
+            time.sleep(2)
+
+
+if __name__ == "__main__":
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+    main()

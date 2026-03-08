@@ -1,0 +1,130 @@
+#!/bin/bash
+# Build wallpaper list cache: scan dirs, generate thumbnails, extract hues, output JSONL
+CACHE_VERSION=28
+
+. "$(dirname "$0")/lib.sh"
+require_cmd jq ffmpeg parallel
+
+# Config and cache paths
+scripts_dir="$PIIXIDENT_CONFIG/scripts"
+cache_dir="$PIIXIDENT_CACHE/wallpaper/thumbs"
+wall_dir=$(cfg_get '.paths.wallpaper')
+we_dir=$(cfg_get '.paths.steamWorkshop')
+we_cache="$PIIXIDENT_CACHE/wallpaper/we-thumbs"
+video_cache="$PIIXIDENT_CACHE/wallpaper/video-thumbs"
+combined_list="$PIIXIDENT_CACHE/wallpaper/list.jsonl"
+checksum_file="$PIIXIDENT_CACHE/wallpaper/checksum.txt"
+version_file="$PIIXIDENT_CACHE/wallpaper/cache-version.txt"
+JOBS=$(nproc)
+mkdir -p "$cache_dir" "$we_cache" "$video_cache"
+
+# Prune orphaned WE thumbnails (workshop item deleted)
+if [ -d "$we_dir" ] && [ -d "$we_cache" ]; then
+  for thumb in "$we_cache"/*.jpg; do
+    [ -f "$thumb" ] || continue
+    id=$(basename "$thumb" .jpg)
+    [ -d "$we_dir/$id" ] || rm -f "$thumb"
+  done
+fi
+# Invalidate cache on version bump
+stored_version=$(cat "$version_file" 2>/dev/null)
+if [ "$stored_version" != "$CACHE_VERSION" ]; then
+  rm -f "$combined_list" "$checksum_file"
+  echo "$CACHE_VERSION" > "$version_file"
+fi
+# Compute file checksums (detect new/changed/removed wallpapers)
+static_check=$(find "$wall_dir" -maxdepth 1 -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' \) ! -name 'wallpaper.jpg' -printf '%f %T@\n' 2>/dev/null | sort)
+video_check=$(find "$wall_dir" -maxdepth 1 -type f \( -iname '*.mp4' -o -iname '*.webm' -o -iname '*.mkv' -o -iname '*.avi' -o -iname '*.mov' \) -printf '%f %T@\n' 2>/dev/null | sort)
+we_check=$(find "$we_dir" -maxdepth 1 -mindepth 1 -type d -printf '%f %T@\n' 2>/dev/null | sort)
+# Early exit if checksums match and cache is fresh
+current_checksum=$(echo "$static_check$video_check$we_check" | md5sum | cut -d' ' -f1)
+stored_checksum=$(cat "$checksum_file" 2>/dev/null)
+if [ "$current_checksum" = "$stored_checksum" ] && [ -f "$combined_list" ]; then
+  echo "cached"
+  exit 0
+fi
+# Load existing cache entries for incremental rebuild
+declare -A existing_cache
+if [ -f "$combined_list" ]; then
+  while IFS= read -r jsonline; do
+    key=$(echo "$jsonline" | jq -r '"\(.type):\(.id // .name)"')
+    mt=$(echo "$jsonline" | jq -r '.mtime')
+    existing_cache["$key"]="$mt"
+    existing_cache["${key}_json"]="$jsonline"
+  done < "$combined_list"
+fi
+tmp_cached=$(mktemp)
+tmp_work=$(mktemp)
+tmp_results=$(mktemp)
+# Collect static images (skip unchanged entries with valid thumbs)
+shopt -s nullglob
+static_files=("$wall_dir"/*.jpg "$wall_dir"/*.jpeg "$wall_dir"/*.png "$wall_dir"/*.webp "$wall_dir"/*.JPG "$wall_dir"/*.JPEG "$wall_dir"/*.PNG "$wall_dir"/*.WEBP)
+video_files=("$wall_dir"/*.mp4 "$wall_dir"/*.webm "$wall_dir"/*.mkv "$wall_dir"/*.avi "$wall_dir"/*.mov)
+we_dirs=("$we_dir"/*/)
+total=$((${#static_files[@]} + ${#video_files[@]} + ${#we_dirs[@]}))
+cached_count=0
+for img in "${static_files[@]}"; do
+  [ -f "$img" ] || continue
+  name=$(basename "$img")
+  [[ "$name" == "wallpaper.jpg" ]] && continue
+  mtime=$(stat -c '%Y' "$img" 2>/dev/null || echo "0")
+  thumb_name="${name%.*}.jpg"
+  thumb_path="$cache_dir/$thumb_name"
+  key="static:$name"
+  if [ -n "${existing_cache[$key]}" ] && [ "${existing_cache[$key]}" = "$mtime" ] && [ -f "$thumb_path" ]; then
+    echo "${existing_cache[${key}_json]}" >> "$tmp_cached"
+    cached_count=$((cached_count + 1))
+    continue
+  fi
+  printf '%s\t%s\t%s\t%s\t%s\t\n' "static" "$img" "$name" "$mtime" "$thumb_path" >> "$tmp_work"
+done
+# Collect video files
+for video in "${video_files[@]}"; do
+  [ -f "$video" ] || continue
+  name=$(basename "$video")
+  mtime=$(stat -c '%Y' "$video" 2>/dev/null || echo "0")
+  thumb_name="${name%.*}.jpg"
+  thumb_path="$video_cache/$thumb_name"
+  key="video:$name"
+  if [ -n "${existing_cache[$key]}" ] && [ "${existing_cache[$key]}" = "$mtime" ] && [ -f "$thumb_path" ]; then
+    echo "${existing_cache[${key}_json]}" >> "$tmp_cached"
+    cached_count=$((cached_count + 1))
+    continue
+  fi
+  printf '%s\t%s\t%s\t%s\t%s\t\n' "video" "$video" "$name" "$mtime" "$thumb_path" >> "$tmp_work"
+done
+# Collect Wallpaper Engine workshops
+for we_id_dir in "${we_dirs[@]}"; do
+  id=$(basename "$we_id_dir")
+  mtime=$(stat -c '%Y' "$we_id_dir" 2>/dev/null || echo "0")
+  thumb_path="$we_cache/$id.jpg"
+  key="we:$id"
+  if [ -n "${existing_cache[$key]}" ] && [ "${existing_cache[$key]}" = "$mtime" ] && [ -f "$thumb_path" ]; then
+    echo "${existing_cache[${key}_json]}" >> "$tmp_cached"
+    cached_count=$((cached_count + 1))
+    continue
+  fi
+  preview=""
+  for p in "${we_id_dir}preview.jpg" "${we_id_dir}preview.png" "${we_id_dir}preview.gif"; do
+    [ -f "$p" ] && preview="$p" && break
+  done
+  [ -z "$preview" ] && continue
+  title=$(jq -r '.title // "Unknown"' "$we_id_dir/project.json" 2>/dev/null)
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "we" "$preview" "$id" "$mtime" "$thumb_path" "$title" >> "$tmp_work"
+done
+# Process new/changed items in parallel with GNU parallel
+work_count=$(wc -l < "$tmp_work" 2>/dev/null || echo 0)
+echo "progress:$cached_count:$total"
+if [ "$work_count" -gt 0 ]; then
+  parallel --line-buffer -j "$JOBS" "$scripts_dir/bash/process-wallpaper-item" < "$tmp_work" > "$tmp_results" 2>/dev/null
+  echo "progress:$total:$total"
+fi
+# Merge cached + new results, sort by hue group, write final JSONL
+cat "$tmp_cached" "$tmp_results" 2>/dev/null | jq -c '.' 2>/dev/null | jq -s 'sort_by(.group, (-.sat))' | jq -c '.[]' > "$combined_list"
+rm -f "$tmp_cached" "$tmp_work" "$tmp_results"
+echo "$current_checksum" > "$checksum_file"
+echo "regenerated"
+if [ "$work_count" -gt 0 ]; then
+  echo "$current_checksum" > "$HOME/.cache/piixident/wallpaper/analysis-trigger"
+  PYTHONUNBUFFERED=1 nohup "$scripts_dir/python/analyze-wallpapers" > "$PIIXIDENT_CACHE/analyze-wallpapers.log" 2>&1 &
+fi

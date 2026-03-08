@@ -1,0 +1,27 @@
+#!/bin/bash
+# Force-regenerate wallpaper analysis by clearing trigger files and re-running cache builder
+
+. "$(dirname "$0")/lib.sh"
+
+CACHE_VERSION_FILE="$PIIXIDENT_CACHE/wallpaper/cache-version.txt"
+SCRIPT="$PIIXIDENT_CONFIG/scripts/bash/check-wallpaper-cache"
+LOG="$PIIXIDENT_CACHE/wallpaper-cache-regen.log"
+
+echo "🔄 Triggering wallpaper cache regeneration..."
+
+# Clear version and last-run markers to force re-analysis
+rm -f "$CACHE_VERSION_FILE"
+rm -f "$PIIXIDENT_CACHE/wallpaper/analysis-lastrun"
+rm -f "$PIIXIDENT_CACHE/wallpaper/colors-lastrun"
+rm -f "$PIIXIDENT_CACHE/wallpaper/tags-lastrun"
+
+# Launch cache builder in background with nohup
+nohup bash -c "$SCRIPT" > "$LOG" 2>&1 &
+disown
+
+echo "✓ Regeneration started (pid $!, log: $LOG)"
+echo ""
+echo "Monitor progress:"
+echo "  tail -f $LOG"
+echo "  tail -f $PIIXIDENT_CACHE/analyze-wallpapers.log"
+echo "  watch -n 2 $PIIXIDENT_CONFIG/scripts/bash/ollama-status"

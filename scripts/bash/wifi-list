@@ -1,0 +1,47 @@
+#!/bin/bash
+# Scan WiFi networks via iwctl and output JSON array with SSID, signal, security
+
+. "$(dirname "$0")/lib.sh"
+require_cmd jq iwctl
+
+wifi_if=$(cfg_get '.network.wifiInterface // "wlan0"')
+
+# Trigger scan and wait for results
+iwctl station "$wifi_if" scan 2>/dev/null
+sleep 0.5
+
+# Strip ANSI escape codes from iwctl output
+output=$(iwctl station "$wifi_if" get-networks 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g')
+
+# Parse each network line into JSON object
+echo "["
+first=true
+echo "$output" | tail -n +5 | while IFS= read -r line; do
+    [[ -z "$line" || "$line" == ---* || "$line" == *"---"* ]] && continue
+
+    connected=false
+    if [[ "$line" =~ ^[[:space:]]*\> ]]; then
+        connected=true
+    fi
+
+    stars=$(echo "$line" | grep -o '\*' | wc -l)
+    signal=$((stars * 25))
+
+    content="${line:6}"
+
+    ssid=$(echo "$content" | cut -c1-32 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    security=$(echo "$content" | cut -c33-52 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+
+    [[ -z "$ssid" ]] && continue
+
+    ssid=$(echo "$ssid" | sed 's/\\/\\\\/g;s/"/\\"/g')
+
+    if [ "$first" = true ]; then
+        first=false
+    else
+        echo ","
+    fi
+    printf '{"ssid":"%s","security":"%s","signal":%d,"connected":%s}' "$ssid" "$security" "$signal" "$connected"
+done
+echo ""
+echo "]"

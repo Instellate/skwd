@@ -1,0 +1,227 @@
+#!/bin/bash
+
+set -e
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$(dirname "$SCRIPT_DIR")")"
+CONFIG_FILE="$PROJECT_DIR/data/config.json"
+
+echo "╔══════════════════════════════════════════════════════════════════════╗"
+echo "║        Piixident — Initial Setup with fancy ASCII art! Tihi!         ║"
+echo "╚══════════════════════════════════════════════════════════════════════╝"
+echo ""
+
+# Check required dependencies
+echo "Checking dependencies..."
+missing=()
+for cmd in jq python3 quickshell; do
+  command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
+done
+
+if [ ${#missing[@]} -gt 0 ]; then
+  echo "  MISSING: ${missing[*]}"
+  echo "  Install these packages before continuing."
+  echo ""
+fi
+
+# Check optional dependencies
+optional_missing=()
+for cmd in matugen ffmpeg mpvpaper grim notify-send parallel; do
+  command -v "$cmd" >/dev/null 2>&1 || optional_missing+=("$cmd")
+done
+if [ ${#optional_missing[@]} -gt 0 ]; then
+  echo "  Optional (for full features): ${optional_missing[*]}"
+  echo ""
+fi
+
+# Auto-detect compositor (niri, hyprland, sway)
+compositor="niri"
+if command -v niri >/dev/null 2>&1; then
+  compositor="niri"
+elif [ -n "$HYPRLAND_INSTANCE_SIGNATURE" ] || command -v hyprctl >/dev/null 2>&1; then
+  compositor="hyprland"
+elif [ -n "$SWAYSOCK" ] || command -v swaymsg >/dev/null 2>&1; then
+  compositor="sway"
+else
+  echo "  WARNING: Could not detect compositor (niri, hyprland, or sway)."
+  echo "  Defaulting to 'niri'. Change 'compositor' in config.json later."
+fi
+echo "  Compositor: $compositor"
+
+# Detect primary monitor
+monitor=""
+case "$compositor" in
+  niri)
+    if command -v niri >/dev/null 2>&1 && pgrep -x niri >/dev/null 2>&1; then
+      monitor=$(niri msg -j outputs 2>/dev/null | jq -r 'keys[0]' 2>/dev/null)
+    fi
+    ;;
+  hyprland)
+    monitor=$(hyprctl -j monitors 2>/dev/null | jq -r '.[0].name' 2>/dev/null)
+    ;;
+  sway)
+    monitor=$(swaymsg -t get_outputs 2>/dev/null | jq -r '.[0].name' 2>/dev/null)
+    ;;
+esac
+[ -z "$monitor" ] && monitor="DP-1"
+echo "Monitor: $monitor"
+
+# Detect WiFi interface
+wifi_if=""
+for iface in /sys/class/net/wl*; do
+  [ -d "$iface" ] && wifi_if=$(basename "$iface") && break
+done
+[ -z "$wifi_if" ] && wifi_if="wlan0"
+echo "Wi-Fi: $wifi_if"
+
+# Detect GPU vendor
+gpu="unknown"
+if command -v nvidia-smi >/dev/null 2>&1; then
+  gpu="nvidia"
+elif [ -d /sys/class/drm/card0/device ] && grep -qi amd /sys/class/drm/card0/device/uevent 2>/dev/null; then
+  gpu="amd"
+elif [ -d /sys/class/drm/card0/device ] && grep -qi intel /sys/class/drm/card0/device/uevent 2>/dev/null; then
+  gpu="intel"
+fi
+echo "GPU: $gpu"
+
+# Locate Steam and Wallpaper Engine paths
+steam_dir=""
+for d in "$HOME/.local/share/Steam" "$HOME/.steam/steam"; do
+  [ -d "$d" ] && steam_dir="$d" && break
+done
+
+we_assets=""
+[ -n "$steam_dir" ] && [ -d "$steam_dir/steamapps/common/wallpaper_engine/assets" ] && \
+  we_assets="$steam_dir/steamapps/common/wallpaper_engine/assets"
+
+we_dir=""
+if [ -n "$steam_dir" ] && [ -f "$steam_dir/steamapps/libraryfolders.vfs" ]; then
+  for lib in $(jq -r '.[] | .path // empty' "$steam_dir/steamapps/libraryfolders.vfs" 2>/dev/null); do
+    candidate="$lib/steamapps/workshop/content/431960"
+    [ -d "$candidate" ] && we_dir="$candidate" && break
+  done
+fi
+[ -z "$we_dir" ] && [ -d "$steam_dir/steamapps/workshop/content/431960" ] && \
+  we_dir="$steam_dir/steamapps/workshop/content/431960"
+
+echo ""
+
+# Create required directories
+mkdir -p "$HOME/.cache/piixident"
+mkdir -p "$HOME/wallpaper" 2>/dev/null || true
+mkdir -p "${XDG_RUNTIME_DIR:-/tmp}/piixident" 2>/dev/null || true
+
+# Generate or skip config.json
+if [ -f "$CONFIG_FILE" ]; then
+  echo "config.json already exists at $CONFIG_FILE"
+  read -rp "Overwrite? [y/N] " overwrite
+  if [ "$overwrite" != "y" ] && [ "$overwrite" != "Y" ]; then
+    echo "Skipping config.json generation."
+    echo ""
+  else
+    generate_config=true
+  fi
+else
+  generate_config=true
+fi
+
+if [ "$generate_config" = true ]; then
+  cat > "$CONFIG_FILE" << EOF
+{
+  "compositor": "$compositor",
+  "paths": {
+    "scripts": "~/.config/piixident/scripts",
+    "cache": "~/.cache/piixident",
+    "wallpaper": "~/wallpaper",
+    "steamWorkshop": "${we_dir:-}",
+    "steamWeAssets": "${we_assets:-}",
+    "steam": "${steam_dir:-}"
+  },
+  "monitor": "$monitor",
+  "location": {
+    "city": "",
+    "timezone": ""
+  },
+  "network": {
+    "wifiInterface": "$wifi_if"
+  },
+  "ollama": {
+    "url": "http://localhost:11434",
+    "model": "gemma3:4b",
+    "vramReclaimModel": "gemma3:27b"
+  },
+  "matugen": {
+    "schemeType": "scheme-fidelity",
+    "kdeColorScheme": "PiixidentMatugen"
+  },
+  "intervals": {
+    "weatherPollMs": 600000,
+    "wifiPollMs": 10000,
+    "smartHomePollMs": 5000,
+    "ollamaStatusPollMs": 5000,
+    "notificationExpireMs": 8000,
+    "systemStatsFastSec": 3,
+    "systemStatsSlowSec": 30
+  },
+  "components": {
+    "bar": true,
+    "lockscreen": true,
+    "appLauncher": true,
+    "wallpaperSelector": true,
+    "windowSwitcher": true,
+    "workspaceSwitcher": true,
+    "powerMenu": true,
+    "smartHome": true,
+    "notifications": true,
+    "weather": true,
+    "wifi": true,
+    "bluetooth": true,
+    "volume": true,
+    "calendar": true,
+    "lyrics": true
+  }
+}
+EOF
+  echo "Generated $CONFIG_FILE"
+fi
+
+# Create secrets.json from example if missing
+if [ ! -f "$PROJECT_DIR/data/secrets.json" ]; then
+  cp "$PROJECT_DIR/data/secrets.json.example" "$PROJECT_DIR/data/secrets.json"
+  echo "Created data/secrets.json from example"
+fi
+
+echo ""
+# Set up Python venv and install dependencies
+VENV_DIR="$PROJECT_DIR/scripts/.venv"
+if [ ! -d "$VENV_DIR" ]; then
+  echo "Creating Python virtual environment..."
+  python3 -m venv "$VENV_DIR"
+  "$VENV_DIR/bin/pip" install -q -r "$PROJECT_DIR/scripts/requirements.txt"
+  echo "Installed Python dependencies."
+else
+  echo "Python venv already exists at scripts/.venv"
+fi
+
+# Create IPC named pipe
+RUNTIME="${XDG_RUNTIME_DIR:-/tmp}/piixident"
+mkdir -p "$RUNTIME"
+if [ ! -p "$RUNTIME/cmd" ]; then
+  mkfifo -m 600 "$RUNTIME/cmd"
+  echo "Created IPC FIFO at $RUNTIME/cmd"
+fi
+
+echo "Initial setup complete, now you need to customise the settings in config.json and add some wallpapers to ~/wallpaper/"
+echo "Next steps:"
+echo "  1. Edit data/config.json to set your city, paths, etc."
+echo "  2. Place wallpapers in ~/wallpaper/"
+echo "  3. Run: quickshell -p ~/.config/piixident"
+echo ""
+echo "Optional:"
+echo "  - Edit data/secrets.json for Home Assistant integration"
+echo "  - Install matugen for dynamic color schemes"
+echo "  - Install Ollama for AI wallpaper analysis"
+echo ""
+echo "IPC commands: echo 'launcher' > ${RUNTIME}/cmd"
+echo "Supported: lock, powermenu, launcher, toggleBar, wallpaper,"
+echo "           smarthome, workspaces, notifications"

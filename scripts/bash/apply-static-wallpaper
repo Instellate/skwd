@@ -1,0 +1,46 @@
+#!/bin/bash
+# Apply a static image wallpaper via awww, run matugen, and propagate theme colors
+. "$(dirname "$0")/lib.sh"
+require_cmd jq
+
+# Config paths
+wall_path="$1"
+wall_dir=$(cfg_get '.paths.wallpaper')
+matugen_scheme=$(cfg_get '.matugen.schemeType // "scheme-fidelity"')
+kde_scheme=$(cfg_get '.matugen.kdeColorScheme // "PiixidentMatugen"')
+
+# Save wallpaper state for restore on next boot
+echo '{"type":"static","path":"'"$wall_path"'"}' > "$PIIXIDENT_CACHE/last-wallpaper.json"
+
+# Kill any running wallpaper engine or video wallpaper
+pkill -9 -f linux-wallpaperengine 2>/dev/null
+pkill mpvpaper 2>/dev/null
+
+rm -f "$wall_dir/lockscreen-video.mp4"
+
+# Launch awww daemon with wipe transition
+cat > "$PIIXIDENT_RUNTIME/start-awww.sh" << INNEREOF
+if ! pgrep -x awww-daemon >/dev/null; then
+  awww-daemon &
+  sleep 0.5
+fi
+awww img "$wall_path" --transition-type wipe --transition-angle 45 --transition-duration 0.5
+INNEREOF
+chmod +x "$PIIXIDENT_RUNTIME/start-awww.sh"
+nohup setsid "$PIIXIDENT_RUNTIME/start-awww.sh" </dev/null >/dev/null 2>&1 &
+
+# Copy wallpaper to canonical path and run matugen theming
+if [ "$(realpath "$wall_path")" != "$(realpath "$wall_dir/wallpaper.jpg")" ]; then
+  cp "$wall_path" "$wall_dir/wallpaper.jpg"
+fi
+has_cmd matugen && matugen image -t "$matugen_scheme" "$wall_path"
+"$(dirname "$0")/apply-niri-colors"
+"$(dirname "$0")/generate-omp-theme"
+
+# Propagate color scheme to KDE, kitty, spicetify
+has_cmd kwriteconfig6 && kwriteconfig6 --file kdeglobals --group General --key ColorScheme "$kde_scheme"
+has_cmd gdbus && gdbus emit --session --object-path /kdeglobals --signal org.kde.kconfig.notify.ConfigChanged \
+  "{'General': [[byte 0x43, 0x6f, 0x6c, 0x6f, 0x72, 0x53, 0x63, 0x68, 0x65, 0x6d, 0x65]]}"
+pkill -USR1 kitty 2>/dev/null
+has_cmd spicetify && spicetify refresh &>/dev/null &
+has_cmd notify-send && notify-send "Wallpaper Changed" "Applied: $(basename "$wall_path")"

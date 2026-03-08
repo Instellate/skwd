@@ -1,0 +1,50 @@
+# Matugen template configuration: maps input templates to output paths for all themed apps
+[config]
+reload_apps = false
+
+# Quickshell MD3 color palette
+[templates.piixident]
+input_path = "~/.config/piixident/ext/matugen/templates/quickshell-colors.json"
+output_path = "~/.cache/piixident/colors.json"
+
+# Niri focus-ring primary color
+[templates.niri-primary]
+input_path = "~/.config/piixident/ext/matugen/templates/niri-colors.kdl"
+output_path = "~/.cache/piixident/niri-primary-color"
+
+# App-specific theme templates
+[templates.kitty]
+input_path = "~/.config/piixident/ext/matugen/templates/kitty.conf"
+output_path = "~/.config/kitty/piixident-theme.conf"
+
+[templates.kde]
+input_path = "~/.config/piixident/ext/matugen/templates/kde-colors.colors"
+output_path = "~/.local/share/color-schemes/PiixidentMatugen.colors"
+
+[templates.vscode]
+input_path = "~/.config/piixident/ext/matugen/templates/vscode-theme.json"
+output_path = "~/.vscode/extensions/matugen.matugen-theme-1.0.0/themes/matugen-color-theme.json"
+
+[templates.vesktop]
+input_path = "~/.config/piixident/ext/matugen/templates/vesktop.css"
+output_path = "~/.config/vesktop/themes/kitty-match.css"
+
+[templates.zen]
+input_path = "~/.config/piixident/ext/matugen/templates/zen.css"
+output_path = "~/.zen/n7jmvslb.Default (release)/chrome/userChrome.css"
+
+[templates.spicetify]
+input_path = "~/.config/piixident/ext/matugen/templates/spicetify.ini"
+output_path = "~/.config/spicetify/Themes/Matugen/color.ini"
+
+[templates.yazi]
+input_path = "~/.config/piixident/ext/matugen/templates/yazi-theme.toml"
+output_path = "~/.config/yazi/theme.toml"
+
+[templates.spicetify-css]
+input_path = "~/.config/piixident/ext/matugen/templates/spicetify.css"
+output_path = "~/.config/spicetify/Themes/Matugen/user.css"
+
+[templates.qt6ct]
+input_path = "~/.config/piixident/ext/matugen/templates/qt6ct-colors.conf"
+output_path = "~/.config/qt6ct/colors/matugen.conf"

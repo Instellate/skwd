@@ -1,0 +1,28 @@
+#!/bin/bash
+# Patch niri config.kdl focus-ring color from matugen-generated primary color
+
+. "$(dirname "$0")/lib.sh"
+
+# Skip if not running niri
+[ "$PIIXIDENT_COMPOSITOR" != "niri" ] && exit 0
+
+# Read cached primary color
+color_file="$PIIXIDENT_CACHE/niri-primary-color"
+niri_config="$HOME/.config/niri/config.kdl"
+
+if [ ! -f "$color_file" ]; then
+  echo "apply-niri-colors: color file not found: $color_file" >&2
+  exit 1
+fi
+
+primary=$(head -1 "$color_file" | tr -d '[:space:]')
+
+if [ -z "$primary" ]; then
+  echo "apply-niri-colors: empty color in $color_file" >&2
+  exit 1
+fi
+
+# Sed-replace the active-color line in niri config
+sed -i "s|active-color \"#[0-9a-fA-F]*\" // matugen:active-color|active-color \"#${primary}\" // matugen:active-color|" "$niri_config"
+
+echo "apply-niri-colors: set focus-ring active-color to #${primary}"

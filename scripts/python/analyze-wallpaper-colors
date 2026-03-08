@@ -1,0 +1,327 @@
+#!/usr/bin/env python3
+"""Analyze wallpaper colors using gemma3 vision model via Ollama"""
+# Imports
+import os
+import sys
+import json
+import base64
+import requests
+from pathlib import Path
+
+import piixconfig
+
+# Path constants and Ollama config
+THUMB_DIR = Path.home() / ".cache/piixident/wallpaper/thumbs"
+WE_THUMB_DIR = Path.home() / ".cache/piixident/wallpaper/we-thumbs"
+VIDEO_THUMB_DIR = Path.home() / ".cache/piixident/wallpaper/video-thumbs"
+COLORS_FILE = Path.home() / ".cache/piixident/wallpaper/colors.json"
+TRIGGER_FILE = Path.home() / ".cache/piixident/wallpaper/analysis-trigger"
+LAST_RUN_FILE = Path.home() / ".cache/piixident/wallpaper/colors-lastrun"
+OLLAMA_URL = piixconfig.ollama_url() + "/api/generate"
+MODEL = piixconfig.ollama_model()
+
+# Color bucket IDs to human names
+COLOR_BUCKETS = {
+    1: "orange",
+    2: "yellow",
+    3: "lime",
+    4: "green",
+    5: "teal",
+    6: "cyan",
+    7: "sky blue",
+    8: "blue",
+    9: "indigo",
+    10: "violet",
+    11: "pink",
+    99: "neutral"
+}
+
+# Color name aliases to bucket IDs
+COLOR_ALIASES = {
+    "crimson": 0,
+    "scarlet": 0,
+    "orange": 1,
+    "amber": 1,
+    "yellow": 2,
+    "gold": 2,
+    "golden": 2,
+    "lime": 3,
+    "chartreuse": 3,
+    "yellow-green": 3,
+    "green": 4,
+    "emerald": 4,
+    "teal": 5,
+    "sea green": 5,
+    "aqua": 5,
+    "cyan": 6,
+    "turquoise": 6,
+    "sky blue": 7,
+    "sky": 7,
+    "light blue": 7,
+    "blue": 8,
+    "navy": 9,
+    "cobalt": 8,
+    "dark blue": 9,
+    "indigo": 9,
+    "dark purple": 9,
+    "violet": 10,
+    "purple": 10,
+    "magenta": 10,
+    "lavender": 10,
+    "lilac": 10,
+    "plum": 10,
+    "pink": 11,
+    "rose": 11,
+    "fuchsia": 11,
+    "hot pink": 11,
+    "salmon": 11,
+    "coral": 1,
+    "peach": 1,
+    "brown": 1,
+    "rust": 1,
+    "copper": 1,
+    "sepia": 1,
+    "tan": 1,
+    "beige": 2,
+    "cream": 2,
+    "maroon": 0,
+    "burgundy": 0,
+    "wine": 0,
+    "olive": 4,
+    "mint": 4,
+    "forest": 4,
+    "dark green": 4,
+    "neon": 4,
+    "neutral": 99,
+    "gray": 99,
+    "grey": 99,
+    "black": 99,
+    "white": 99,
+    "grayscale": 99,
+    "monochrome": 99,
+}
+
+# Detailed Ollama prompt for color identification
+PROMPT = """What is the single most dominant color tone of this wallpaper image?
+
+Pick EXACTLY ONE from this list:
+red, orange, yellow, lime, green, teal, cyan, sky blue, blue, indigo, violet, pink, neutral
+
+Color guide (use these to distinguish similar colors):
+- red = warm red, crimson, scarlet, maroon
+- orange = orange, amber, brown, peach, coral, rust, copper
+- yellow = bright yellow, gold, golden
+- lime = yellow-green, chartreuse, neon green
+- green = green, emerald, forest green, olive
+- teal = blue-green, sea green, dark cyan
+- cyan = bright cyan, turquoise, aqua
+- sky blue = light blue, pastel blue, clear daytime sky color
+- blue = medium to bright blue, cobalt, royal blue
+- indigo = dark blue, navy blue, deep blue-purple, dark night sky
+- violet = purple, magenta, lavender, lilac, plum, amethyst
+- pink = pink, rose, fuchsia, hot pink, salmon
+- neutral = ONLY for truly grayscale images with NO color tint at all (pure black/white/gray)
+
+IMPORTANT: Most images have a color tone even if muted or dark. A dark blue image is "indigo" not "neutral". A sepia image is "orange" not "neutral". Only use "neutral" for images with absolutely zero color.
+
+Also rate how saturated/vibrant the color is from 0-100:
+- 100 = extremely vibrant pure color
+- 60 = clearly colorful
+- 30 = muted/pastel but still identifiable
+- 10 = very desaturated but has a slight tint
+- 0 = truly zero color (grayscale only)
+
+Output ONLY in this exact format, nothing else:
+COLOR|SATURATION
+
+Examples: blue|85  violet|45  orange|30  indigo|20  neutral|0"""
+
+TAG_THUMB_SIZE = (320, 180)
+
+# Hue degree ranges to bucket IDs
+HUE_RANGES = [
+    (15, 45, 1),
+    (45, 65, 2),
+    (65, 85, 3),
+    (85, 150, 4),
+    (150, 170, 5),
+    (170, 190, 6),
+    (190, 215, 7),
+    (215, 250, 8),
+    (250, 270, 9),
+    (270, 330, 10),
+    (330, 345, 11),
+    (345, 360, 0),
+]
+
+# Pixel-based HSV fallback for neutral correction
+def compute_dominant_hue(thumb_path: Path) -> tuple[int, int]:
+    """Compute dominant hue from pixels using PIL. Returns (hue_bucket, saturation).
+    Only considers pixels with saturation > 15% to ignore grays."""
+    from PIL import Image
+    import colorsys
+
+    img = Image.open(thumb_path).convert('RGB')
+    img.thumbnail((80, 45), Image.LANCZOS)
+    pixels = list(img.getdata())
+
+    chromatic = []
+    for r, g, b in pixels:
+        h, s, v = colorsys.rgb_to_hsv(r/255, g/255, b/255)
+        if s > 0.12 and v > 0.08:
+            chromatic.append((h * 360, s * 100, v * 100))
+
+    if len(chromatic) < len(pixels) * 0.05:
+        return 99, 0
+
+    import math
+    sin_sum = 0
+    cos_sum = 0
+    sat_sum = 0
+    weight_sum = 0
+    for h, s, v in chromatic:
+        w = s * v / 100
+        sin_sum += math.sin(math.radians(h)) * w
+        cos_sum += math.cos(math.radians(h)) * w
+        sat_sum += s * w
+        weight_sum += w
+
+    avg_hue = math.degrees(math.atan2(sin_sum, cos_sum)) % 360
+    avg_sat = sat_sum / weight_sum if weight_sum > 0 else 0
+
+    for low, high, bucket in HUE_RANGES:
+        if low <= avg_hue < high:
+            return bucket, int(avg_sat)
+
+    return 99, 0
+
+# Ollama vision call with response parsing and pixel fallback
+def analyze_color(thumb_path: Path) -> tuple[int, int]:
+    """Analyze dominant color using gemma3 vision. Returns (hue_bucket, saturation)"""
+    from PIL import Image
+    import io
+    img = Image.open(thumb_path)
+    img.thumbnail(TAG_THUMB_SIZE, Image.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, format='JPEG', quality=75)
+    img_base64 = base64.b64encode(buf.getvalue()).decode()
+
+    try:
+        response = requests.post(OLLAMA_URL, json={
+            'model': MODEL,
+            'prompt': PROMPT,
+            'images': [img_base64],
+            'stream': False
+        }, timeout=180)
+
+        text = response.json().get('response', '').strip().lower()
+
+        if '|' in text:
+            parts = text.split('|')
+            color_name = parts[0].strip()
+            try:
+                saturation = int(parts[1].strip())
+            except:
+                saturation = 50
+
+            hue_bucket = COLOR_ALIASES.get(color_name, None)
+            if hue_bucket is None:
+                for alias, bucket in COLOR_ALIASES.items():
+                    if alias in color_name or color_name in alias:
+                        hue_bucket = bucket
+                        break
+                else:
+                    hue_bucket = 99
+
+            if hue_bucket == 99:
+                pix_hue, pix_sat = compute_dominant_hue(thumb_path)
+                if pix_hue != 99 and pix_sat > 15:
+                    return pix_hue, pix_sat
+
+            return hue_bucket, min(100, max(0, saturation))
+
+        text_clean = text.strip().rstrip('.')
+        hue_bucket = COLOR_ALIASES.get(text_clean, None)
+        if hue_bucket is not None:
+            return hue_bucket, 50
+
+        return compute_dominant_hue(thumb_path)
+
+    except Exception as e:
+        print(f"  Error: {e}", file=sys.stderr)
+        return compute_dominant_hue(thumb_path)
+
+# Main processing loop with trigger check and periodic saves
+def main():
+
+    last_run_hash = ""
+    if LAST_RUN_FILE.exists():
+        last_run_hash = LAST_RUN_FILE.read_text().strip()
+
+    if not trigger_hash or trigger_hash == last_run_hash:
+        print("No new wallpapers to analyze (hash unchanged)")
+        return
+
+    if COLORS_FILE.exists() and COLORS_FILE.stat().st_size > 0:
+        try:
+            with open(COLORS_FILE) as f:
+                colors_db = json.load(f)
+        except (json.JSONDecodeError, ValueError):
+            colors_db = {}
+    else:
+        colors_db = {}
+
+    thumbs = sorted(THUMB_DIR.glob("*.jpg"))
+    if WE_THUMB_DIR.exists():
+        thumbs += sorted(WE_THUMB_DIR.glob("*.jpg"))
+    if VIDEO_THUMB_DIR.exists():
+        thumbs += sorted(VIDEO_THUMB_DIR.glob("*.jpg"))
+    total = len(thumbs)
+
+    unanalyzed = [t for t in thumbs if t.stem not in colors_db]
+    print(f"Total thumbnails: {total}")
+    print(f"Already analyzed: {total - len(unanalyzed)}")
+    print(f"To process: {len(unanalyzed)}")
+
+    if not unanalyzed:
+        print("All wallpapers have color data!")
+        return
+
+    try:
+        for i, thumb in enumerate(unanalyzed):
+            name = thumb.stem
+            print(f"[{i+1}/{len(unanalyzed)}] {name}...", end=" ", flush=True)
+
+            hue, sat = analyze_color(thumb)
+            colors_db[name] = {"hue": hue, "saturation": sat}
+            color_name = COLOR_BUCKETS.get(hue, "unknown")
+            print(f"{color_name} (saturation: {sat})")
+
+            if (i + 1) % 10 == 0:
+                with open(COLORS_FILE, 'w') as f:
+                    json.dump(colors_db, f)
+
+    except KeyboardInterrupt:
+        print("\nInterrupted, saving progress...")
+
+    with open(COLORS_FILE, 'w') as f:
+        json.dump(colors_db, f)
+
+    if trigger_hash:
+        LAST_RUN_FILE.write_text(trigger_hash)
+
+    print(f"\nDone! Colors saved to {COLORS_FILE}")
+
+    bucket_counts = {}
+    for data in colors_db.values():
+        hue = data.get("hue", 99)
+        bucket_counts[hue] = bucket_counts.get(hue, 0) + 1
+
+    print("\nColor distribution:")
+    for bucket, name in sorted(COLOR_BUCKETS.items()):
+        count = bucket_counts.get(bucket, 0)
+        if count > 0:
+            print(f"  {name}: {count}")
+
+if __name__ == "__main__":
+    main()

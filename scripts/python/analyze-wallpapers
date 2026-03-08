@@ -1,0 +1,231 @@
+#!/usr/bin/env python3
+"""Analyze wallpaper colors AND tags in a single pass using gemma3 vision via Ollama"""
+# Imports
+import os
+import sys
+import json
+import base64
+import math
+import colorsys
+import requests
+from pathlib import Path
+import hashlib
+
+import piixconfig
+
+# Path constants and Ollama config
+THUMB_DIR = Path.home() / ".cache/piixident/wallpaper/thumbs"
+WE_THUMB_DIR = Path.home() / ".cache/piixident/wallpaper/we-thumbs"
+VIDEO_THUMB_DIR = Path.home() / ".cache/piixident/wallpaper/video-thumbs"
+COLORS_FILE = Path.home() / ".cache/piixident/wallpaper/colors.json"
+TAGS_FILE = Path.home() / ".cache/piixident/wallpaper/tags.json"
+TRIGGER_FILE = Path.home() / ".cache/piixident/wallpaper/analysis-trigger"
+LAST_RUN_FILE = Path.home() / ".cache/piixident/wallpaper/analysis-lastrun"
+OLLAMA_URL = piixconfig.ollama_url() + "/api/generate"
+MODEL = piixconfig.ollama_model()
+
+THUMB_SIZE = (320, 180)
+
+# Color bucket IDs to human names
+COLOR_BUCKETS = {
+    0: "red", 1: "orange", 2: "yellow", 3: "lime",
+    4: "green", 5: "teal", 6: "cyan", 7: "sky blue",
+    8: "blue", 9: "indigo", 10: "violet", 11: "pink",
+    99: "neutral"
+}
+
+# Color name aliases to bucket IDs
+COLOR_ALIASES = {
+    "red": 0, "crimson": 0, "scarlet": 0, "maroon": 0, "burgundy": 0, "wine": 0,
+    "orange": 1, "amber": 1, "gold": 2, "golden": 2, "coral": 1, "peach": 1,
+    "brown": 1, "rust": 1, "copper": 1, "sepia": 1, "tan": 1,
+    "yellow": 2, "beige": 2, "cream": 2,
+    "lime": 3, "chartreuse": 3, "yellow-green": 3,
+    "green": 4, "emerald": 4, "olive": 4, "mint": 4, "forest": 4, "dark green": 4, "neon": 4,
+    "teal": 5, "sea green": 5, "aqua": 5,
+    "cyan": 6, "turquoise": 6,
+    "sky blue": 7, "sky": 7, "light blue": 7,
+    "blue": 8, "cobalt": 8,
+    "navy": 9, "dark blue": 9, "indigo": 9, "dark purple": 9,
+    "violet": 10, "purple": 10, "magenta": 10, "lavender": 10, "lilac": 10, "plum": 10,
+    "pink": 11, "rose": 11, "fuchsia": 11, "hot pink": 11, "salmon": 11,
+    "neutral": 99, "gray": 99, "grey": 99, "black": 99, "white": 99,
+    "grayscale": 99, "monochrome": 99,
+}
+
+# Ollama vision prompt
+PROMPT = """First line: dominant color from [red, orange, yellow, lime, green, teal, cyan, sky blue, blue, indigo, violet, pink, neutral] and saturation 0-100. Format: COLOR|NUMBER
+Color tips: dark blue/navy=indigo, brown/sepia/earth=orange, purple=violet, light blue=sky blue. Use neutral ONLY for pure grayscale.
+Second line: 8-12 comma-separated single-word tags for what you see.
+Two lines only, nothing else."""
+
+# Hue degree ranges to bucket IDs
+HUE_RANGES = [
+    (0, 15, 0), (15, 45, 1), (45, 65, 2), (65, 85, 3),
+    (85, 150, 4), (150, 170, 5), (170, 190, 6), (190, 215, 7),
+    (215, 250, 8), (250, 270, 9), (270, 330, 10), (330, 345, 11), (345, 360, 0),
+]
+
+# Pixel-based HSV fallback when Ollama returns neutral incorrectly
+def compute_dominant_hue(thumb_path: Path) -> tuple[int, int]:
+    """Pixel-based hue fallback for when Ollama says neutral incorrectly."""
+    from PIL import Image
+    img = Image.open(thumb_path).convert('RGB')
+    img.thumbnail((80, 45), Image.LANCZOS)
+    pixels = list(img.getdata())
+    chromatic = []
+    for r, g, b in pixels:
+        h, s, v = colorsys.rgb_to_hsv(r/255, g/255, b/255)
+        if s > 0.12 and v > 0.08:
+            chromatic.append((h * 360, s * 100, v * 100))
+    if len(chromatic) < len(pixels) * 0.05:
+        return 99, 0
+    sin_sum = cos_sum = sat_sum = weight_sum = 0
+    for h, s, v in chromatic:
+        w = s * v / 100
+        sin_sum += math.sin(math.radians(h)) * w
+        cos_sum += math.cos(math.radians(h)) * w
+        sat_sum += s * w
+        weight_sum += w
+    avg_hue = math.degrees(math.atan2(sin_sum, cos_sum)) % 360
+    avg_sat = sat_sum / weight_sum if weight_sum > 0 else 0
+    for low, high, bucket in HUE_RANGES:
+        if low <= avg_hue < high:
+            return bucket, int(avg_sat)
+    return 99, 0
+
+# Single Ollama call returning color + tags with pixel fallback
+def analyze_wallpaper(thumb_path: Path) -> tuple[tuple[int, int], list[str]]:
+    """Analyze color + tags in one Ollama call. Returns ((hue_bucket, sat), [tags])."""
+    from PIL import Image
+    import io
+    img = Image.open(thumb_path)
+    img.thumbnail(THUMB_SIZE, Image.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, format='JPEG', quality=75)
+    img_base64 = base64.b64encode(buf.getvalue()).decode()
+
+    try:
+        response = requests.post(OLLAMA_URL, json={
+            'model': MODEL,
+            'prompt': PROMPT,
+            'images': [img_base64],
+            'stream': False
+        }, timeout=180)
+        text = response.json().get('response', '').strip()
+        lines = [l.strip() for l in text.split('\n') if l.strip()]
+
+        hue_bucket, saturation = 99, 0
+        tags = []
+        color_line = None
+        tag_line = None
+
+        for line in lines:
+            if '|' in line and color_line is None:
+                color_line = line
+            elif ',' in line and tag_line is None:
+                tag_line = line
+
+        if color_line:
+            parts = color_line.split('|')
+            color_name = parts[0].strip().lower()
+            try:
+                saturation = int(parts[1].strip())
+            except:
+                saturation = 50
+            hue_bucket = COLOR_ALIASES.get(color_name, None)
+            if hue_bucket is None:
+                for alias, bucket in COLOR_ALIASES.items():
+                    if alias in color_name or color_name in alias:
+                        hue_bucket = bucket
+                        break
+                else:
+                    hue_bucket = 99
+
+        if hue_bucket == 99:
+            pix_hue, pix_sat = compute_dominant_hue(thumb_path)
+            if pix_hue != 99 and pix_sat > 15:
+                hue_bucket, saturation = pix_hue, pix_sat
+
+        if tag_line:
+            tags = [t.strip().lower().rstrip('.').strip() for t in tag_line.split(',')]
+            tags = [t for t in tags if t and len(t) < 25 and ' ' not in t and not t.startswith('-')]
+            tags = tags[:20]
+
+        return (hue_bucket, min(100, max(0, saturation))), tags
+
+    except Exception as e:
+        print(f"  Error: {e}", file=sys.stderr)
+        pix_hue, pix_sat = compute_dominant_hue(thumb_path)
+        return (pix_hue, pix_sat), []
+
+# Main processing loop with trigger hash check and periodic saves
+def main():
+        print("No new wallpapers to analyze (hash unchanged)")
+        return
+
+    colors_db = {}
+    if COLORS_FILE.exists() and COLORS_FILE.stat().st_size > 0:
+        try:
+            colors_db = json.load(open(COLORS_FILE))
+        except:
+            colors_db = {}
+
+    tags_db = {}
+    if TAGS_FILE.exists() and TAGS_FILE.stat().st_size > 0:
+        try:
+            tags_db = json.load(open(TAGS_FILE))
+        except:
+            tags_db = {}
+
+    thumbs = sorted(THUMB_DIR.glob("*.jpg"))
+    if WE_THUMB_DIR.exists():
+        thumbs += sorted(WE_THUMB_DIR.glob("*.jpg"))
+    if VIDEO_THUMB_DIR.exists():
+        thumbs += sorted(VIDEO_THUMB_DIR.glob("*.jpg"))
+
+    to_process = [t for t in thumbs if t.stem not in colors_db or t.stem not in tags_db or not tags_db.get(t.stem)]
+    total = len(thumbs)
+    print(f"Total thumbnails: {total}")
+    print(f"To process: {len(to_process)}")
+
+    if not to_process:
+        print("All wallpapers analyzed!")
+        return
+
+    try:
+        for i, thumb in enumerate(to_process):
+            name = thumb.stem
+            print(f"[{i+1}/{len(to_process)}] {name}...", end=" ", flush=True)
+
+            (hue, sat), tags = analyze_wallpaper(thumb)
+            colors_db[name] = {"hue": hue, "saturation": sat}
+            tags_db[name] = tags
+            color_name = COLOR_BUCKETS.get(hue, "?")
+            tag_preview = ', '.join(tags[:5]) + ('...' if len(tags) > 5 else '')
+            print(f"{color_name}|{sat}  [{tag_preview}]")
+
+            if (i + 1) % 10 == 0:
+                json.dump(colors_db, open(COLORS_FILE, 'w'))
+                json.dump(tags_db, open(TAGS_FILE, 'w'))
+
+    except KeyboardInterrupt:
+        print("\nInterrupted, saving progress...")
+
+    json.dump(colors_db, open(COLORS_FILE, 'w'))
+    json.dump(tags_db, open(TAGS_FILE, 'w'))
+
+    if trigger_hash:
+        LAST_RUN_FILE.write_text(trigger_hash)
+
+    print(f"\nDone! {len(colors_db)} colors, {len(tags_db)} tags")
+    print("\nColor distribution:")
+    from collections import Counter
+    bucket_counts = Counter(d.get("hue", 99) for d in colors_db.values())
+    for bucket in sorted(COLOR_BUCKETS.keys()):
+        count = bucket_counts.get(bucket, 0)
+        if count > 0:
+            print(f"  {COLOR_BUCKETS[bucket]:10s}: {count}")
+
+if __name__ == "__main__":
+    main()

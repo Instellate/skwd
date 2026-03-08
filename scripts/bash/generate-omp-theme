@@ -1,0 +1,132 @@
+#!/bin/bash
+# Generate oh-my-posh theme JSON from matugen colors.json
+
+. "$(dirname "$0")/lib.sh"
+require_cmd python3
+
+COLORS="$PIIXIDENT_CACHE/colors.json"
+OUTPUT="$PIIXIDENT_CONFIG/ext/omp/piixident.omp.json"
+
+if [ ! -f "$COLORS" ]; then
+  echo "No colors.json found" >&2
+  exit 1
+fi
+
+mkdir -p "$(dirname "$OUTPUT")"
+
+# Extract color values via Python
+primary=$(python3 -c "import json; print(json.load(open('$COLORS'))['primary'])")
+on_primary=$(python3 -c "import json; print(json.load(open('$COLORS'))['primaryText'])")
+tertiary=$(python3 -c "import json; print(json.load(open('$COLORS'))['tertiary'])")
+on_tertiary=$(python3 -c "import json; print(json.load(open('$COLORS'))['tertiaryText'])")
+surface=$(python3 -c "import json; print(json.load(open('$COLORS'))['surface'])")
+surface_variant=$(python3 -c "import json; print(json.load(open('$COLORS'))['surfaceVariant'])")
+on_surface_variant=$(python3 -c "import json; print(json.load(open('$COLORS'))['surfaceVariantText'])")
+error=$(python3 -c "import json; print(json.load(open('$COLORS'))['error'])")
+on_error=$(python3 -c "import json; print(json.load(open('$COLORS'))['errorText'])")
+outline=$(python3 -c "import json; print(json.load(open('$COLORS'))['outline'])")
+
+# Write omp theme with powerline segments (path, git, status, time)
+cat > "$OUTPUT" << THEME
+{
+  "\$schema": "https://raw.githubusercontent.com/JanDeDobbeleer/oh-my-posh/main/themes/schema.json",
+  "version": 3,
+  "final_space": true,
+  "console_title_template": "{{ .Shell }} in {{ .Folder }}",
+  "palette": {
+    "primary": "${primary}",
+    "on-primary": "${on_primary}",
+    "tertiary": "${tertiary}",
+    "on-tertiary": "${on_tertiary}",
+    "surface": "${surface}",
+    "surface-variant": "${surface_variant}",
+    "on-surface-variant": "${on_surface_variant}",
+    "error": "${error}",
+    "on-error": "${on_error}",
+    "outline": "${outline}"
+  },
+  "blocks": [
+    {
+      "type": "prompt",
+      "alignment": "left",
+      "segments": [
+        {
+          "type": "path",
+          "style": "powerline",
+          "powerline_symbol": "\ue0b8",
+          "foreground": "p:on-primary",
+          "background": "p:primary",
+          "template": " \uf413 {{ .Path }} ",
+          "properties": {
+            "style": "agnoster_short",
+            "max_depth": 3
+          }
+        },
+        {
+          "type": "git",
+          "style": "powerline",
+          "powerline_symbol": "\ue0b8",
+          "foreground": "p:on-tertiary",
+          "background": "p:tertiary",
+          "template": " \ue0a0 {{ .HEAD }}{{ if .Working.Changed }} \uf044 {{ .Working.String }}{{ end }}{{ if .Staging.Changed }} \uf046 {{ .Staging.String }}{{ end }} ",
+          "properties": {
+            "branch_icon": "",
+            "fetch_status": true,
+            "fetch_stash_count": true
+          }
+        },
+        {
+          "type": "status",
+          "style": "powerline",
+          "powerline_symbol": "\ue0b8",
+          "foreground": "p:on-error",
+          "background": "p:error",
+          "template": " \uf00d {{ .Code }} "
+        }
+      ]
+    },
+    {
+      "type": "prompt",
+      "alignment": "right",
+      "overflow": "hide",
+      "segments": [
+        {
+          "type": "executiontime",
+          "style": "powerline",
+          "powerline_symbol": "\ue0ba",
+          "invert_powerline": true,
+          "foreground": "p:on-surface-variant",
+          "background": "p:surface-variant",
+          "template": " \uf252 {{ .FormattedMs }} ",
+          "properties": {
+            "threshold": 2000,
+            "style": "roundrock"
+          }
+        },
+        {
+          "type": "time",
+          "style": "powerline",
+          "powerline_symbol": "\ue0ba",
+          "invert_powerline": true,
+          "foreground": "p:on-primary",
+          "background": "p:primary",
+          "template": " {{ .CurrentDate | date \"15:04\" }} "
+        }
+      ]
+    },
+    {
+      "type": "prompt",
+      "alignment": "left",
+      "newline": true,
+      "segments": [
+        {
+          "type": "text",
+          "style": "plain",
+          "foreground": "p:primary",
+          "template": "❯ "
+        }
+      ]
+    }
+  ]
+}
+THEME

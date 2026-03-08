@@ -1,0 +1,20 @@
+#!/bin/bash
+# Wipe all wallpaper caches and thumbnails for a fresh start
+set -e
+
+. "$(dirname "$0")/lib.sh"
+
+# Delete all cached wallpaper files
+echo "🗑️  Clearing all wallpaper caches and thumbnails..."
+find "$PIIXIDENT_CACHE/wallpaper" -type f -delete 2>/dev/null
+
+echo "✓ Caches cleared"
+echo ""
+echo "📋 Now manually trigger regeneration when ready:"
+echo "   $PIIXIDENT_CONFIG/scripts/bash/regenerate-wallpaper-analysis"
+echo ""
+echo "📊 Monitor progress with:"
+echo "   $PIIXIDENT_CONFIG/scripts/bash/ollama-status"
+echo ""
+echo "👀 For live monitoring:"
+echo "   watch -n 2 $PIIXIDENT_CONFIG/scripts/bash/ollama-status"

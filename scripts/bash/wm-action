@@ -1,0 +1,69 @@
+#!/bin/bash
+# Compositor-agnostic WM action dispatcher (niri, hyprland, sway)
+
+. "$(dirname "$0")/lib.sh"
+
+action="$1"; shift
+
+case "$PIIXIDENT_COMPOSITOR" in
+
+  # Niri compositor actions
+  niri)
+    case "$action" in
+      focus-window)     niri msg action focus-window --id "$1" ;;
+      close-window)     niri msg action close-window --id "$1" ;;
+      focus-monitor)    niri msg action focus-monitor "$1" ;;
+      focus-workspace)  niri msg action focus-workspace "$1" ;;
+      list-windows)     niri msg --json windows ;;
+      list-workspaces)  niri msg --json workspaces ;;
+      list-outputs)     niri msg --json outputs ;;
+      event-stream)     exec niri msg --json event-stream ;;
+      screenshot-window) niri msg action screenshot-window --id "$1" --path "$2" ;;
+      screenshot-output) grim -o "$1" "$2" ;;
+      quit)             niri msg action quit ;;
+      *)                echo "wm-action: unknown action: $action" >&2; exit 1 ;;
+    esac
+    ;;
+
+  # Hyprland compositor actions
+  hyprland)
+    case "$action" in
+      focus-window)     hyprctl dispatch focuswindow "address:$1" ;;
+      close-window)     hyprctl dispatch closewindow "address:$1" ;;
+      focus-monitor)    hyprctl dispatch focusmonitor "$1" ;;
+      focus-workspace)  hyprctl dispatch workspace "$1" ;;
+      list-windows)     hyprctl -j clients ;;
+      list-workspaces)  hyprctl -j workspaces ;;
+      list-outputs)     hyprctl -j monitors | jq '[.[] | {key: .name, value: .}] | from_entries' ;;
+      event-stream)     exec socat -U - "UNIX-CONNECT:$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock" ;;
+      screenshot-window) grim -g "$(hyprctl -j clients | jq -r --arg addr "$1" '.[] | select(.address == $addr) | "\(.at[0]),\(.at[1]) \(.size[0])x\(.size[1])"')" "$2" ;;
+      screenshot-output) grim -o "$1" "$2" ;;
+      quit)             hyprctl dispatch exit ;;
+      *)                echo "wm-action: unknown action: $action" >&2; exit 1 ;;
+    esac
+    ;;
+
+  # Sway compositor actions
+  sway)
+    case "$action" in
+      focus-window)     swaymsg "[con_id=$1] focus" ;;
+      close-window)     swaymsg "[con_id=$1] kill" ;;
+      focus-monitor)    swaymsg "focus output $1" ;;
+      focus-workspace)  swaymsg "workspace $1" ;;
+      list-windows)     swaymsg -t get_tree | jq '[.. | objects | select(.pid? > 0 and .type? == "con")]' ;;
+      list-workspaces)  swaymsg -t get_workspaces ;;
+      list-outputs)     swaymsg -t get_outputs | jq '[.[] | {key: .name, value: .}] | from_entries' ;;
+      event-stream)     exec swaymsg -t subscribe -m '["workspace","window"]' ;;
+      screenshot-window) swaymsg "[con_id=$1] focus" && grim -g "$(swaymsg -t get_tree | jq -r '.. | objects | select(.focused?) | .rect | "\(.x),\(.y) \(.width)x\(.height)"')" "$2" ;;
+      screenshot-output) grim -o "$1" "$2" ;;
+      quit)             swaymsg exit ;;
+      *)                echo "wm-action: unknown action: $action" >&2; exit 1 ;;
+    esac
+    ;;
+
+  *)
+    echo "wm-action: unsupported compositor '$PIIXIDENT_COMPOSITOR'" >&2
+    echo "  Set 'compositor' in config.json to: niri, hyprland, or sway" >&2
+    exit 1
+    ;;
+esac

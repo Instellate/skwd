@@ -1,0 +1,137 @@
+#!/usr/bin/env python3
+"""Pre-generate matugen colors for all wallpapers and cache them"""
+# Imports
+import os
+import sys
+import json
+import subprocess
+from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# Path constants
+THUMB_DIR = Path.home() / ".cache/piixident/wallpaper/thumbs"
+WE_THUMB_DIR = Path.home() / ".cache/piixident/wallpaper/we-thumbs"
+WALL_DIR = Path.home() / "wallpaper"
+CACHE_FILE = Path.home() / ".cache/piixident/wallpaper/matugen-colors.json"
+MAX_WORKERS = 4
+
+# Run matugen and extract dark-mode colors
+def get_matugen_colors(image_path: Path) -> dict | None:
+    """Run matugen on an image and extract all colors (dark mode)"""
+    try:
+        result = subprocess.run(
+            ["matugen", "image", str(image_path), "--dry-run", "--json", "hex"],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+
+        if result.returncode != 0:
+            return None
+
+        data = json.loads(result.stdout)
+        colors = data.get("colors", {})
+
+        extracted = {}
+        for key, value in colors.items():
+            parts = key.split('_')
+            camel_key = parts[0] + ''.join(p.capitalize() for p in parts[1:])
+
+            if isinstance(value, dict):
+                extracted[camel_key] = value.get("dark", value.get("default", "#888888"))
+            else:
+                extracted[camel_key] = value
+
+        return extracted
+    except Exception as e:
+        print(f"  Error processing {image_path.name}: {e}", file=sys.stderr)
+        return None
+
+# Process single wallpaper (skip if cached)
+def process_wallpaper(wall_path: Path, existing_cache: dict) -> tuple[str, dict | None]:
+    """Process a single wallpaper, return (name, colors)"""
+    name = wall_path.stem
+
+    if name in existing_cache:
+        return name, None
+
+    colors = get_matugen_colors(wall_path)
+    if colors:
+        print(f"  Generated: {name}")
+    return name, colors
+
+# Load cache, collect wallpapers, parallel generation
+def main():
+    cache = {}
+    if CACHE_FILE.exists():
+        try:
+            with open(CACHE_FILE) as f:
+                cache = json.load(f)
+            print(f"Loaded {len(cache)} cached colors")
+        except:
+            cache = {}
+
+    wallpapers = []
+
+    if WALL_DIR.exists():
+        for ext in ['*.jpg', '*.jpeg', '*.png', '*.webp']:
+            wallpapers.extend(WALL_DIR.glob(ext))
+            wallpapers.extend(WALL_DIR.glob(ext.upper()))
+
+    import re
+    frame_pattern = re.compile(r'-\d+$')
+
+    if WE_THUMB_DIR.exists():
+        for thumb in WE_THUMB_DIR.glob("*.jpg"):
+            name = thumb.stem
+            if frame_pattern.search(name):
+                continue
+            if name not in cache and name not in [w.stem for w in wallpapers]:
+                wallpapers.append(thumb)
+
+    if THUMB_DIR.exists():
+        for thumb in THUMB_DIR.glob("*.jpg"):
+            name = thumb.stem
+            if name not in cache and name not in [w.stem for w in wallpapers]:
+                wallpapers.append(thumb)
+
+    to_process = [w for w in wallpapers if w.stem not in cache]
+
+    if not to_process:
+        print("All wallpapers already cached")
+        return
+
+    print(f"Processing {len(to_process)} wallpapers...")
+
+    def save_cache(cache):
+        """Atomic save - write to temp file then rename"""
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode='w', dir=CACHE_FILE.parent,
+                                          suffix='.tmp', delete=False) as f:
+            json.dump(cache, f, indent=2)
+            temp_path = Path(f.name)
+        temp_path.rename(CACHE_FILE)
+
+    new_count = 0
+    total = len(to_process)
+
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = {executor.submit(process_wallpaper, wp, cache): wp for wp in to_process}
+
+        for i, future in enumerate(as_completed(futures), 1):
+            name, colors = future.result()
+            if colors:
+                cache[name] = colors
+                new_count += 1
+
+                if new_count % 50 == 0:
+                    save_cache(cache)
+
+            print(f"progress:{i}:{total}")
+
+    save_cache(cache)
+
+    print(f"Done! Generated {new_count} new color schemes, total cached: {len(cache)}")
+
+if __name__ == "__main__":
+    main()

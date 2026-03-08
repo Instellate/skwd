@@ -1,0 +1,100 @@
+#!/bin/bash
+# Live TUI monitor for ollama wallpaper tagging and color analysis progress
+
+. "$(dirname "$0")/lib.sh"
+
+TAG_LOG="$PIIXIDENT_CACHE/tag-wallpapers.log"
+COLOR_LOG="$PIIXIDENT_CACHE/analyze-wallpaper-colors.log"
+HOME_DIR="$HOME"
+
+# ANSI color codes
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+RESET='\033[0m'
+
+while true; do
+  clear
+  echo -e "${BLUE}╔════════════════════════════════════════════════════╗${RESET}"
+  echo -e "${BLUE}║        Ollama Wallpaper Analysis Monitor           ║${RESET}"
+  echo -e "${BLUE}╚════════════════════════════════════════════════════╝${RESET}"
+  echo ""
+
+  # Check if analysis processes are running
+  tag_running=$(pgrep -f "[t]ag-wallpapers" > /dev/null && echo "yes" || echo "no")
+  color_running=$(pgrep -f "[a]nalyze-wallpaper-colors" > /dev/null && echo "yes" || echo "no")
+
+  echo -e "${YELLOW}Process Status:${RESET}"
+  echo -ne "  Tagging: "
+  [ "$tag_running" = "yes" ] && echo -e "${GREEN}⚙️  Running${RESET}" || echo -e "${RED}⏹️  Stopped${RESET}"
+  echo -ne "  Color Analysis: "
+  [ "$color_running" = "yes" ] && echo -e "${GREEN}⚙️  Running${RESET}" || echo -e "${RED}⏹️  Stopped${RESET}"
+  echo ""
+
+  # Tagging progress bar
+  if [ -f "$TAG_LOG" ]; then
+    echo -e "${YELLOW}Tagging Progress:${RESET}"
+    tag_count=$(grep -c "^\[" "$TAG_LOG" 2>/dev/null || echo 0)
+    tag_total=$(tail -100 "$TAG_LOG" | grep -o '\[[0-9]*/[0-9]*\]' | tail -1 | grep -o '[0-9]*\]$' | tr -d ']')
+    [ -z "$tag_total" ] && tag_total=$(grep -o '\[[0-9]*/[0-9]*\]' "$TAG_LOG" | tail -1 | grep -o '/[0-9]*' | tr -d '/' || echo "?")
+
+    if [ -n "$tag_total" ] && [ "$tag_total" != "?" ]; then
+      pct=$((tag_count * 100 / tag_total))
+      bar_filled=$((pct / 5))
+      bar_empty=$((20 - bar_filled))
+      bar=$(printf "%${bar_filled}s" | tr ' ' '█')
+      bar=$(printf "%-20s" "$bar" | tr ' ' '░')
+      echo "  $bar $tag_count/$tag_total ($pct%)"
+    else
+      echo "  Processed: $tag_count entries"
+    fi
+
+    last_tag=$(tail -1 "$TAG_LOG")
+    if [[ "$last_tag" =~ \[.*\] ]]; then
+      echo "  Last: $(echo "$last_tag" | cut -c1-70)..."
+    fi
+  else
+    echo -e "  ${RED}No log file${RESET}"
+  fi
+  echo ""
+
+  # Color analysis progress bar
+  if [ -f "$COLOR_LOG" ]; then
+    echo -e "${YELLOW}Color Analysis Progress:${RESET}"
+    color_count=$(grep -c "^\[" "$COLOR_LOG" 2>/dev/null || echo 0)
+    color_total=$(tail -100 "$COLOR_LOG" | grep -o '\[[0-9]*/[0-9]*\]' | tail -1 | grep -o '[0-9]*\]$' | tr -d ']')
+    [ -z "$color_total" ] && color_total=$(grep -o '\[[0-9]*/[0-9]*\]' "$COLOR_LOG" | tail -1 | grep -o '/[0-9]*' | tr -d '/' || echo "?")
+
+    if [ -n "$color_total" ] && [ "$color_total" != "?" ]; then
+      pct=$((color_count * 100 / color_total))
+      bar_filled=$((pct / 5))
+      bar_empty=$((20 - bar_filled))
+      bar=$(printf "%${bar_filled}s" | tr ' ' '█')
+      bar=$(printf "%-20s" "$bar" | tr ' ' '░')
+      echo "  $bar $color_count/$color_total ($pct%)"
+    else
+      echo "  Processed: $color_count entries"
+    fi
+
+    last_color=$(tail -1 "$COLOR_LOG")
+    if [[ "$last_color" =~ \[.*\] ]]; then
+      echo "  Last: $(echo "$last_color" | cut -c1-70)..."
+    fi
+  else
+    echo -e "  ${RED}No log file${RESET}"
+  fi
+  echo ""
+
+  # Cache file counts
+  echo -e "${YELLOW}Cache Status:${RESET}"
+  [ -f "$HOME_DIR/.cache/piixident/wallpaper/tags.json" ] && tags_count=$(jq 'keys | length' "$HOME_DIR/.cache/piixident/wallpaper/tags.json" 2>/dev/null || echo 0) || tags_count=0
+  [ -f "$HOME_DIR/.cache/piixident/wallpaper/colors.json" ] && colors_count=$(jq 'keys | length' "$HOME_DIR/.cache/piixident/wallpaper/colors.json" 2>/dev/null || echo 0) || colors_count=0
+
+  echo "  Tagged wallpapers: $tags_count"
+  echo "  Analyzed colors: $colors_count"
+  echo ""
+
+  echo -e "${BLUE}Refreshing in 2s... Press Ctrl+C to exit${RESET}"
+  sleep 2
+done

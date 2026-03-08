@@ -1,0 +1,34 @@
+{
+  "_comment": "App customization for the launcher and window switcher. Each key is matched case-insensitively against the .desktop Name field.",
+  "_usage": "Each value is an object with optional fields: background (image path), icon (nerd font glyph), displayName (custom name shown in UI), hidden (true to hide from launcher/switcher), tags (space-separated searchable tags).",
+  "_fields": {
+    "background": "Absolute path to a background image shown behind the app in the launcher",
+    "icon": "Nerd Font glyph to override the default app icon",
+    "displayName": "Custom display name shown in the UI instead of the .desktop Name",
+    "hidden": "Set to true to hide the app from the launcher",
+    "tags": "Space-separated keywords for search (e.g. "chat voice call")"
+  },
+  "discord": {
+    "background": "~/.config/piixident/images/apps/discord.webp",
+    "icon": "󰙯",
+    "displayName": "Totally Not Discord Trust Me Bro",
+    "tags": "chat voice call kitten"
+  },
+  "firefox": {
+    "icon": "",
+    "displayName": "Firefox",
+    "tags": "browser web"
+  },
+  "kitty": {
+    "icon": "",
+    "displayName": "Terminal",
+    "tags": "shell console"
+  },
+  "xfce4-settings-manager": {
+    "hidden": true
+  },
+  "steam": {
+    "icon": "",
+    "displayName": "Steam"
+  }
+}

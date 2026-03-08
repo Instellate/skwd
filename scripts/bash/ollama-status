@@ -1,0 +1,90 @@
+#!/bin/bash
+# Display ollama wallpaper analysis progress with bar charts and cache counts
+
+. "$(dirname "$0")/lib.sh"
+
+ANALYSIS_LOG="$PIIXIDENT_CACHE/analyze-wallpapers.log"
+HOME_DIR="$HOME"
+
+# Extract [current/total] progress pattern from log line
+extract_progress() {
+  local line="$1"
+  echo "$line" | grep -o '\[[0-9]*/[0-9]*\]' | head -1
+}
+
+# Render progress bar with unicode blocks
+make_bar() {
+  local current=$1
+  local total=$2
+  local width=20
+
+  if [ "$total" -eq 0 ]; then
+    echo "0/0 [-------------------] 0%"
+    return
+  fi
+
+  local pct=$((current * 100 / total))
+  local filled=$((pct * width / 100))
+  local empty=$((width - filled))
+
+  local bar=$(printf '%.0s█' $(seq 1 $filled))
+  bar="$bar$(printf '%.0s░' $(seq 1 $empty))"
+
+  printf "%d/%d [%s] %d%%" "$current" "$total" "$bar" "$pct"
+}
+
+# Header and process status
+printf "%-40s %s\n" "OLLAMA ANALYSIS STATUS" "$(date '+%H:%M:%S')"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+analysis_pid=$(pgrep -f "[a]nalyze-wallpapers")
+
+printf "%-40s %s\n" "Analysis process:" "${analysis_pid:-stopped}"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# Analysis progress from log file
+echo "ANALYSIS PROGRESS (tags + colors):"
+if [ -f "$ANALYSIS_LOG" ]; then
+  analysis_last=$(tail -1 "$ANALYSIS_LOG")
+  progress=$(extract_progress "$analysis_last")
+
+  if [ -n "$progress" ]; then
+    current=$(echo "$progress" | cut -d'/' -f1 | tr -d '[')
+    total=$(echo "$progress" | cut -d'/' -f2 | tr -d ']')
+    printf "  "
+    make_bar "$current" "$total"
+    printf "\n"
+    printf "  Last: %s\n" "$(echo "$analysis_last" | cut -c1-80)"
+  else
+    printf "  %s\n" "$analysis_last"
+  fi
+else
+  printf "  (no log file)\n"
+fi
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# Cache file statistics
+echo "CACHE STATUS:"
+if [ -f "$HOME_DIR/.cache/piixident/wallpaper/tags.json" ]; then
+  tags_count=$(jq 'keys | length' "$HOME_DIR/.cache/piixident/wallpaper/tags.json" 2>/dev/null || echo 0)
+else
+  tags_count=0
+fi
+
+if [ -f "$HOME_DIR/.cache/piixident/wallpaper/colors.json" ]; then
+  colors_count=$(jq 'keys | length' "$HOME_DIR/.cache/piixident/wallpaper/colors.json" 2>/dev/null || echo 0)
+else
+  colors_count=0
+fi
+
+if [ -f "$HOME_DIR/.cache/piixident/wallpaper/list.jsonl" ]; then
+  total_wallpapers=$(wc -l < "$HOME_DIR/.cache/piixident/wallpaper/list.jsonl" 2>/dev/null || echo 0)
+else
+  total_wallpapers="?"
+fi
+
+printf "  Total wallpapers: %s\n" "$total_wallpapers"
+printf "  Tagged: %d\n" "$tags_count"
+printf "  Color analyzed: %d\n" "$colors_count"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

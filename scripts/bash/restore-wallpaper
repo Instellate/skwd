@@ -1,0 +1,24 @@
+#!/bin/bash
+# Restore the last applied wallpaper on startup
+. "$(dirname "$0")/lib.sh"
+
+state="$PIIXIDENT_CACHE/last-wallpaper.json"
+[ -f "$state" ] || exit 0
+
+type=$(jq -r '.type // ""' "$state" 2>/dev/null)
+scripts="$(dirname "$0")"
+
+case "$type" in
+  static)
+    path=$(jq -r '.path // ""' "$state" 2>/dev/null)
+    [ -f "$path" ] && exec "$scripts/apply-static-wallpaper" "$path"
+    ;;
+  video)
+    path=$(jq -r '.path // ""' "$state" 2>/dev/null)
+    [ -f "$path" ] && exec "$scripts/apply-video-wallpaper" "$path"
+    ;;
+  we)
+    we_id=$(jq -r '.we_id // ""' "$state" 2>/dev/null)
+    [ -n "$we_id" ] && exec "$scripts/apply-we-wallpaper" "$we_id"
+    ;;
+esac

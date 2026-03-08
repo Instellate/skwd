@@ -1,0 +1,59 @@
+#!/bin/bash
+# Apply a video wallpaper via mpvpaper, extract thumbnail, run matugen theming
+. "$(dirname "$0")/lib.sh"
+require_cmd jq ffmpeg mpvpaper
+
+# Config from piixconfig
+_wall_dir=$(cfg_get '.paths.wallpaper')
+_matugen_scheme=$(cfg_get '.matugen.schemeType // "scheme-fidelity"')
+_kde_scheme=$(cfg_get '.matugen.kdeColorScheme // "PiixidentMatugen"')
+
+# Save wallpaper state for restore on next boot
+echo '{"type":"video","path":"'"$1"'"}' > "$PIIXIDENT_CACHE/last-wallpaper.json"
+
+# Run in background subshell via nohup
+nohup bash -c '
+video_path="$1"
+wall_dir="$2"
+matugen_scheme="$3"
+kde_scheme="$4"
+video_cache="$HOME/.cache/piixident/wallpaper/video-thumbs"
+
+pkill -9 linux-wallpaper 2>/dev/null
+pkill mpvpaper 2>/dev/null
+
+rm -f "$wall_dir/lockscreen-video.mp4"
+
+video_name=$(basename "$video_path")
+thumb_name="${video_name%.*}.jpg"
+thumb_path="$video_cache/$thumb_name"
+
+if [ ! -f "$thumb_path" ]; then
+  mkdir -p "$video_cache"
+  ffmpeg -y -ss 1 -i "$video_path" -vframes 1 -vf "scale=640:360:force_original_aspect_ratio=increase,crop=640:360" "$thumb_path" 2>/dev/null
+fi
+
+mpvpaper -o "loop" "*" "$video_path" &
+mpv_pid=$!
+
+sleep 1.5
+
+pkill awww-daemon 2>/dev/null
+
+if [ -f "$thumb_path" ]; then
+  cp "$thumb_path" "$wall_dir/wallpaper.jpg"
+  command -v matugen >/dev/null && matugen image -t "$matugen_scheme" "$thumb_path"
+  "$(dirname "$0")/apply-niri-colors"
+  "$(dirname "$0")/generate-omp-theme"
+fi
+
+command -v kwriteconfig6 >/dev/null && kwriteconfig6 --file kdeglobals --group General --key ColorScheme "$kde_scheme"
+
+command -v gdbus >/dev/null && gdbus emit --session --object-path /kdeglobals --signal org.kde.kconfig.notify.ConfigChanged \
+  "{'\''General'\'': [[byte 0x43, 0x6f, 0x6c, 0x6f, 0x72, 0x53, 0x63, 0x68, 0x65, 0x6d, 0x65]]}"
+
+pkill -USR1 kitty 2>/dev/null
+command -v spicetify >/dev/null && spicetify refresh &>/dev/null &
+
+command -v notify-send >/dev/null && notify-send "Video Wallpaper" "Applied: $(basename "$video_path")"
+' _ "$1" "$_wall_dir" "$_matugen_scheme" "$_kde_scheme" </dev/null >/dev/null 2>&1 &

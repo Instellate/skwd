@@ -1,0 +1,78 @@
+#!/usr/bin/env python3
+"""Merge synonym tags into canonical forms"""
+import json
+from pathlib import Path
+
+# Tags database path
+TAGS_FILE = Path.home() / ".cache" / "piixident" / "wallpaper" / "tags.json"
+
+# Load existing tags
+with open(TAGS_FILE) as f:
+    tags_db = json.load(f)
+
+# Synonym mapping (canonical tag -> alternatives)
+synonyms = {
+    "peaceful": ["serene", "tranquil", "calm"],
+    "dreamy": ["ethereal", "surreal"],
+    "mysterious": ["eerie", "ominous", "mystical"],
+    "dark": ["moody", "gloomy", "somber", "shadowy"],
+    "cozy": ["warm"],
+
+    "monochrome": ["grayscale", "grey", "gray"],
+    "sci-fi": ["scifi", "futuristic"],
+    "cyberpunk": ["neon", "vaporwave"],
+
+    "mountain": ["mountains", "hills"],
+    "flower": ["flowers", "floral", "bloom", "blossom", "botanical"],
+    "tree": ["trees", "foliage", "leaves"],
+    "building": ["buildings", "architecture"],
+    "plant": ["plants"],
+    "ocean": ["seascape", "coastal", "waves", "beach"],
+    "city": ["urban", "cityscape", "skyline"],
+    "night": ["nighttime"],
+    "outdoor": ["outdoors", "exterior"],
+    "indoor": ["indoors", "interior"],
+    "shadow": ["shadows", "silhouette"],
+    "star": ["stars", "celestial", "cosmic", "nebula"],
+    "cloud": ["clouds", "cloudy"],
+    "rock": ["rocks", "rugged"],
+
+    "sunset": ["dusk", "twilight"],
+}
+
+# Build reverse lookup (synonym -> canonical)
+merge_map = {}
+for target, sources in synonyms.items():
+    for source in sources:
+        merge_map[source] = target
+
+# Apply merges to all wallpaper tags
+changes = 0
+for name, tags in tags_db.items():
+    new_tags = []
+    seen = set()
+    for tag in tags:
+        canonical = merge_map.get(tag, tag)
+        if canonical not in seen:
+            new_tags.append(canonical)
+            seen.add(canonical)
+    if new_tags != tags:
+        changes += 1
+    tags_db[name] = new_tags
+
+# Save and print statistics
+with open(TAGS_FILE, 'w') as f:
+    json.dump(tags_db, f)
+
+print(f"Merged synonyms in {changes} wallpapers")
+
+tag_counts = {}
+for tags in tags_db.values():
+    for tag in tags:
+        tag_counts[tag] = tag_counts.get(tag, 0) + 1
+
+print(f"\nNew unique tag count: {len(tag_counts)}")
+print("\nTop 30 tags after merge:")
+sorted_tags = sorted(tag_counts.items(), key=lambda x: -x[1])
+for tag, count in sorted_tags[:30]:
+    print(f"  {tag}: {count}")

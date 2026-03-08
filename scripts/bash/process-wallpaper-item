@@ -1,0 +1,96 @@
+#!/bin/bash
+# Process one wallpaper item: generate thumbnail, extract dominant hue, output JSONL
+IFS=$'\t' read -r type src name mtime thumb_path title <<< "$1"
+
+# Thumbnail generation by type (static image, video frame, WE preview)
+case "$type" in
+  static)
+    ffmpeg -y -i "$src" -vf "scale=640:360:force_original_aspect_ratio=increase,crop=640:360" -q:v 2 -frames:v 1 -update 1 "$thumb_path" 2>/dev/null
+    color_src="$src"
+    ;;
+  video)
+    ffmpeg -y -ss 1 -i "$src" -vf "scale=640:360:force_original_aspect_ratio=increase,crop=640:360" -q:v 2 -frames:v 1 -update 1 "$thumb_path" 2>/dev/null
+    color_src="$thumb_path"
+    ;;
+  we)
+    we_dir=$(dirname "$src")
+    we_sub_type=$(jq -r '.type // "scene"' "$we_dir/project.json" 2>/dev/null)
+    we_video_file=""
+    if [ "$we_sub_type" = "video" ]; then
+      pj_file=$(jq -r '.file // ""' "$we_dir/project.json" 2>/dev/null)
+      [ -n "$pj_file" ] && [ -f "$we_dir/$pj_file" ] && we_video_file="$we_dir/$pj_file"
+    fi
+    video_file=""
+    for ext in mp4 webm; do
+      found=$(find "$we_dir" -maxdepth 1 -iname "*.$ext" ! -iname "preview.*" -print -quit 2>/dev/null)
+      [ -n "$found" ] && video_file="$found" && break
+    done
+    if [ -n "$video_file" ]; then
+      ffmpeg -y -ss 2 -i "$video_file" -vf "scale=640:360:force_original_aspect_ratio=increase,crop=640:360" -q:v 2 -frames:v 1 -update 1 "$thumb_path" 2>/dev/null
+    fi
+    if [ ! -f "$thumb_path" ] || [ ! -s "$thumb_path" ]; then
+      ffmpeg -y -i "$src" -vf "scale=640:360:force_original_aspect_ratio=increase,crop=640:360" -q:v 2 -frames:v 1 -update 1 "$thumb_path" 2>/dev/null
+    fi
+    color_src="$thumb_path"
+    ;;
+esac
+[ ! -f "$thumb_path" ] && exit 0
+
+# Dominant hue extraction via Python PIL (HSV analysis, 12 color buckets)
+read -r group sat <<< "$(python3 << PYINNER
+from PIL import Image
+import colorsys
+import math
+img = Image.open('$color_src').convert('RGB').resize((50, 50))
+pixels = list(img.getdata())
+saturations = [colorsys.rgb_to_hls(r/255, g/255, b/255)[2] for r,g,b in pixels]
+colorful_pct = sum(1 for s in saturations if s > 0.3) / len(saturations) * 100
+if colorful_pct >= 10:
+    sin_sum = 0
+    cos_sum = 0
+    sat_total = 0
+    sat_count = 0
+    for (r,g,b), sat in zip(pixels, saturations):
+        if sat > 0.2:
+            h, l, s = colorsys.rgb_to_hls(r/255, g/255, b/255)
+            lum_weight = 1 - abs(l - 0.5) * 2
+            weight = sat * max(0.1, lum_weight)
+            angle = h * 2 * math.pi
+            sin_sum += math.sin(angle) * weight
+            cos_sum += math.cos(angle) * weight
+            sat_total += sat
+            sat_count += 1
+    if sat_count > 0:
+        avg_hue_rad = math.atan2(sin_sum, cos_sum)
+        if avg_hue_rad < 0:
+            avg_hue_rad += 2 * math.pi
+        avg_hue = avg_hue_rad * 180 / math.pi
+        group = int((avg_hue + 15) / 30) % 12
+        avg_sat = int((sat_total / sat_count) * 100)
+        print(group, avg_sat)
+    else:
+        print(99, 0)
+else:
+    print(99, 0)
+PYINNER
+)"
+: "${group:=99}"
+: "${sat:=0}"
+
+# Output JSONL entry with hue group, saturation, metadata
+case "$type" in
+  static|video)
+    vf=""
+    [ "$type" = "video" ] && vf="$src"
+    jq -cn --argjson g "$group" --argjson s "$sat" --argjson m "$mtime" \
+      --arg t "$type" --arg id "" --arg n "$name" --arg th "$thumb_path" \
+      --arg vf "$vf" \
+      '{group:$g,sat:$s,mtime:$m,type:$t,id:$id,name:$n,thumb:$th,videoFile:$vf}'
+    ;;
+  we)
+    jq -cn --argjson g "$group" --argjson s "$sat" --argjson m "$mtime" \
+      --arg t "we" --arg id "$name" --arg n "$title" --arg th "$thumb_path" \
+      --arg vf "${we_video_file:-}" \
+      '{group:$g,sat:$s,mtime:$m,type:$t,id:$id,name:$n,thumb:$th,videoFile:$vf}'
+    ;;
+esac

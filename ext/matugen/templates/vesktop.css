@@ -1,0 +1,103 @@
+
+
+/* Matugen template: Vesktop/Discord ClearVision theme from wallpaper */
+@import url("https://clearvision.github.io/ClearVision-v7/main.css");
+@import url("https://clearvision.github.io/ClearVision-v7/betterdiscord.css");
+
+
+:root {
+
+  --main-color: {{colors.primary.default.hex}};
+  --hover-color: {{colors.secondary.default.hex}};
+  --success-color: {{colors.tertiary.default.hex}};
+  --danger-color: {{colors.error.default.hex}};
+
+
+  --online-color: {{colors.tertiary.default.hex}};
+  --idle-color: {{colors.tertiary.default.hex}};
+  --dnd-color: {{colors.error.default.hex}};
+  --streaming-color: {{colors.secondary.default.hex}};
+  --offline-color: {{colors.outline.default.hex}};
+
+
+  --background-shading-percent: 100%;
+  --background-image: none;
+  --background-position: center;
+  --background-size: cover;
+  --background-attachment: fixed;
+  --background-filter: none;
+
+
+  --user-popout-image: none;
+  --user-popout-position: center;
+  --user-popout-size: cover;
+  --user-popout-attachment: fixed;
+  --user-popout-filter: none;
+
+
+  --user-modal-image: none;
+  --user-modal-position: center;
+  --user-modal-size: cover;
+  --user-modal-attachment: fixed;
+  --user-modal-filter: none;
+
+
+  --main-font: "gg sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --code-font: Consolas, "gg mono", "Liberation Mono", Menlo, Courier, monospace;
+
+
+  --channel-unread: {{colors.on_surface.default.hex}};
+  --channel-unread-hover: {{colors.on_surface_variant.default.hex}};
+  --channel-selected-bg: {{colors.surface_container.default.hex}};
+
+
+  --focus-color: {{colors.primary.default.hex}};
+}
+
+
+:is(.theme-dark, .theme-light .theme-dark) {
+  --background-shading: rgba({{colors.surface.default.red}}, {{colors.surface.default.green}}, {{colors.surface.default.blue}}, 0.4);
+  --card-shading: rgba({{colors.surface.default.red}}, {{colors.surface.default.green}}, {{colors.surface.default.blue}}, 0.2);
+  --popout-shading: rgba({{colors.surface.default.red}}, {{colors.surface.default.green}}, {{colors.surface.default.blue}}, 0.6);
+  --modal-shading: rgba({{colors.surface.default.red}}, {{colors.surface.default.green}}, {{colors.surface.default.blue}}, 0.4);
+  --input-shading: rgba({{colors.surface.default.red}}, {{colors.surface.default.green}}, {{colors.surface.default.blue}}, 0.3);
+  --normal-text: {{colors.on_surface.default.hex}};
+  --muted-text: {{colors.on_surface_variant.default.hex}};
+}
+
+:is(.theme-darker, .theme-light .theme-darker) {
+  --background-shading: rgba({{colors.surface.default.red}}, {{colors.surface.default.green}}, {{colors.surface.default.blue}}, 0.5);
+  --card-shading: rgba({{colors.surface.default.red}}, {{colors.surface.default.green}}, {{colors.surface.default.blue}}, 0.3);
+  --popout-shading: rgba({{colors.surface.default.red}}, {{colors.surface.default.green}}, {{colors.surface.default.blue}}, 0.7);
+  --modal-shading: rgba({{colors.surface.default.red}}, {{colors.surface.default.green}}, {{colors.surface.default.blue}}, 0.5);
+  --input-shading: rgba({{colors.surface.default.red}}, {{colors.surface.default.green}}, {{colors.surface.default.blue}}, 0.3);
+  --normal-text: {{colors.on_surface.default.hex}};
+  --muted-text: {{colors.on_surface_variant.default.hex}};
+}
+
+:is(.theme-midnight, .theme-light .theme-midnight) {
+  --background-shading: rgba({{colors.surface.default.red}}, {{colors.surface.default.green}}, {{colors.surface.default.blue}}, 0.7);
+  --card-shading: rgba({{colors.surface.default.red}}, {{colors.surface.default.green}}, {{colors.surface.default.blue}}, 0.4);
+  --popout-shading: rgba({{colors.surface.default.red}}, {{colors.surface.default.green}}, {{colors.surface.default.blue}}, 0.8);
+  --modal-shading: rgba({{colors.surface.default.red}}, {{colors.surface.default.green}}, {{colors.surface.default.blue}}, 0.6);
+  --input-shading: rgba({{colors.surface.default.red}}, {{colors.surface.default.green}}, {{colors.surface.default.blue}}, 0.3);
+  --normal-text: {{colors.on_surface.default.hex}};
+  --muted-text: {{colors.on_surface_variant.default.hex}};
+}
+
+
+#app-mount {
+  background: transparent !important;
+}
+
+html, body {
+  background: transparent !important;
+}
+
+
+._2debea61131de3de-info::after,
+.c38106a3f0c3ca76-leading::before,
+.c38106a3f0c3ca76-leading::after {
+  display: none !important;
+  content: none !important;
+}

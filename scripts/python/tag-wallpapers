@@ -1,0 +1,131 @@
+#!/usr/bin/env python3
+"""Tag wallpapers using gemma3 vision model via Ollama"""
+# Imports
+import os
+import sys
+import json
+import base64
+import requests
+from pathlib import Path
+import hashlib
+
+import piixconfig
+
+# Path constants and Ollama config
+THUMB_DIR = Path.home() / ".cache/piixident/wallpaper/thumbs"
+WE_THUMB_DIR = Path.home() / ".cache/piixident/wallpaper/we-thumbs"
+VIDEO_THUMB_DIR = Path.home() / ".cache/piixident/wallpaper/video-thumbs"
+WALL_DIR = piixconfig.wallpaper_dir()
+TAGS_FILE = Path.home() / ".cache/piixident/wallpaper/tags.json"
+TRIGGER_FILE = Path.home() / ".cache/piixident/wallpaper/analysis-trigger"
+LAST_RUN_FILE = Path.home() / ".cache/piixident/wallpaper/tags-lastrun"
+OLLAMA_URL = piixconfig.ollama_url() + "/api/generate"
+MODEL = piixconfig.ollama_model()
+
+# Ollama tagging prompt
+PROMPT = """Generate 8-15 single-word search tags for this wallpaper. Include:
+
+SUBJECT: What/who is shown (girl, boy, cat, dog, dragon, robot, car, city, forest, mountain, ocean, space, etc.)
+CHARACTER TYPE: If applicable (anime, realistic, chibi, monster, demon, oni, angel, warrior, mage, etc.)
+MOOD/VIBE: The feeling (dark, bright, cozy, epic, peaceful, dramatic, mysterious, romantic, scary, cute, etc.)
+COLORS: Dominant colors (red, blue, purple, orange, neon, pastel, monochrome, etc.)
+STYLE: Art style (anime, pixel, photorealistic, painting, minimalist, abstract, cyberpunk, fantasy, scifi, etc.)
+SETTING: Where it takes place (bedroom, street, ruins, underwater, sky, battlefield, etc.)
+
+Output ONLY lowercase comma-separated tags. No descriptions, no sentences."""
+
+TAG_THUMB_SIZE = (160, 90)
+
+# Ollama vision call for tag extraction
+def get_tags(thumb_path: Path) -> list[str]:
+    """Get tags for an image using gemma3 vision"""
+    from PIL import Image
+    import io
+    img = Image.open(thumb_path)
+    img.thumbnail(TAG_THUMB_SIZE, Image.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, format='JPEG', quality=75)
+    img_base64 = base64.b64encode(buf.getvalue()).decode()
+
+    try:
+        response = requests.post(OLLAMA_URL, json={
+            'model': MODEL,
+            'prompt': PROMPT,
+            'images': [img_base64],
+            'stream': False
+        }, timeout=180)
+
+        text = response.json().get('response', '')
+        tags = [t.strip().lower().rstrip('.').strip() for t in text.split(',')]
+        tags = [t for t in tags if t and len(t) < 25 and ' ' not in t and not t.startswith('-')]
+        return tags[:20]
+    except Exception as e:
+        print(f"  Error: {e}", file=sys.stderr)
+        return []
+
+# Main processing loop with trigger check and periodic saves
+def main():
+
+    last_run_hash = ""
+    if LAST_RUN_FILE.exists():
+        last_run_hash = LAST_RUN_FILE.read_text().strip()
+
+    if not trigger_hash or trigger_hash == last_run_hash:
+        print("No new wallpapers to analyze (hash unchanged)")
+        return
+
+    if TAGS_FILE.exists() and TAGS_FILE.stat().st_size > 0:
+        try:
+            with open(TAGS_FILE) as f:
+                tags_db = json.load(f)
+        except (json.JSONDecodeError, ValueError):
+            tags_db = {}
+    else:
+        tags_db = {}
+
+    thumbs = sorted(THUMB_DIR.glob("*.jpg"))
+    if WE_THUMB_DIR.exists():
+        thumbs += sorted(WE_THUMB_DIR.glob("*.jpg"))
+    if VIDEO_THUMB_DIR.exists():
+        thumbs += sorted(VIDEO_THUMB_DIR.glob("*.jpg"))
+    total = len(thumbs)
+
+    untagged = [t for t in thumbs if t.stem not in tags_db or not tags_db.get(t.stem)]
+    print(f"Total thumbnails: {total}")
+    print(f"Already tagged: {total - len(untagged)}")
+    print(f"To process: {len(untagged)}")
+
+    if not untagged:
+        print("All wallpapers are tagged!")
+        return
+
+    try:
+        for i, thumb in enumerate(untagged):
+            name = thumb.stem
+            print(f"[{i+1}/{len(untagged)}] {name}...", end=" ", flush=True)
+
+            tags = get_tags(thumb)
+            if tags:
+                tags_db[name] = tags
+                print(f"{', '.join(tags)}")
+            else:
+                tags_db[name] = []
+                print("(no tags)")
+
+            if (i + 1) % 10 == 0:
+                with open(TAGS_FILE, 'w') as f:
+                    json.dump(tags_db, f)
+
+    except KeyboardInterrupt:
+        print("\nInterrupted, saving progress...")
+
+    with open(TAGS_FILE, 'w') as f:
+        json.dump(tags_db, f)
+
+    if trigger_hash:
+        LAST_RUN_FILE.write_text(trigger_hash)
+
+    print(f"\nDone! Tags saved to {TAGS_FILE}")
+
+if __name__ == "__main__":
+    main()

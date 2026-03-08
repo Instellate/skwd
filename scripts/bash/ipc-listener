@@ -1,0 +1,34 @@
+#!/bin/bash
+# Named-pipe IPC listener: reads commands from $PIIXIDENT_RUNTIME/cmd FIFO
+
+. "$(dirname "$0")/lib.sh"
+
+FIFO="$PIIXIDENT_RUNTIME/cmd"
+PIDFILE="$PIIXIDENT_RUNTIME/cmd.pid"
+
+# Kill previous listener if running
+if [ -f "$PIDFILE" ]; then
+    while IFS= read -r pid; do
+        kill "$pid" 2>/dev/null
+    done < "$PIDFILE"
+    rm -f "$PIDFILE"
+fi
+
+fuser -k "$FIFO" 2>/dev/null
+sleep 0.1
+
+# Recreate FIFO with restricted permissions
+rm -f "$FIFO"
+mkfifo -m 600 "$FIFO"
+
+echo $$ > "$PIDFILE"
+
+# Cleanup handler on exit
+trap 'rm -f "$PIDFILE"; kill $(jobs -p) 2>/dev/null; exit' TERM HUP EXIT INT
+
+# Blocking read loop (cat blocks until data arrives)
+# Use sed to ensure line buffering - it automatically flushes on newlines
+while true; do
+    sed -u '' "$FIFO" &
+    wait $!
+done

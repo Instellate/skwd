@@ -1,0 +1,85 @@
+#!/bin/bash
+# Apply a Steam Wallpaper Engine wallpaper, reclaim VRAM from ollama, run matugen
+we_id="$1"
+. "$(dirname "$0")/lib.sh"
+require_cmd jq
+
+# Config paths and matugen settings
+we_dir=$(cfg_get '.paths.steamWorkshop')
+wall_dir=$(cfg_get '.paths.wallpaper')
+we_assets=$(cfg_get '.paths.steamWeAssets')
+ollama_url=$(cfg_get '.ollama.url // "http://localhost:11434"')
+ollama_vram_model=$(cfg_get '.ollama.vramReclaimModel // "gemma3:27b"')
+matugen_scheme=$(cfg_get '.matugen.schemeType // "scheme-fidelity"')
+kde_scheme=$(cfg_get '.matugen.kdeColorScheme // "PiixidentMatugen"')
+lockscreen_video="$wall_dir/lockscreen-video.mp4"
+wm="$(dirname "$0")/wm-action"
+
+# Save wallpaper state for restore on next boot
+echo '{"type":"we","we_id":"'"$we_id"'"}' > "$PIIXIDENT_CACHE/last-wallpaper.json"
+
+# Stop any running analysis and reclaim VRAM from ollama
+pkill -f "tag-wallpapers" 2>/dev/null
+pkill -f "analyze-wallpaper-colors" 2>/dev/null
+pkill -f "process-wallpaper-item" 2>/dev/null
+pkill -f "regenerate-wallpaper-analysis" 2>/dev/null
+curl -sf "$ollama_url/api/generate" -d '{"model":"'"$ollama_vram_model"'","keep_alive":0}' >/dev/null 2>&1 &
+sleep 2
+
+# Kill existing wallpaper processes
+pkill awww-daemon 2>/dev/null
+pkill awww 2>/dev/null
+pkill mpvpaper 2>/dev/null
+
+# Read WE project metadata and detect video type
+project_json="$we_dir/$we_id/project.json"
+we_type=$(jq -r '.type // "scene"' "$project_json" 2>/dev/null)
+we_file=$(jq -r '.file // ""' "$project_json" 2>/dev/null)
+
+# Symlink lockscreen video if WE type is video
+rm -f "$lockscreen_video"
+
+if [ "$we_type" = "video" ] && [ -n "$we_file" ]; then
+  video_path="$we_dir/$we_id/$we_file"
+  if [ -f "$video_path" ]; then
+    ln -sf "$video_path" "$lockscreen_video"
+  fi
+fi
+
+# Launch linux-wallpaperengine on all outputs
+old_pids=$(pgrep -f linux-wallpaperengine | tr '\n' ' ')
+
+# Build screen-root args
+screen_roots=$("$wm" list-outputs 2>/dev/null | jq -r 'to_entries[] | .key' | sed 's/^/--screen-root /' | tr '\n' ' ')
+
+cat > "$PIIXIDENT_RUNTIME/start-we.sh" << INNEREOF
+#!/bin/bash
+linux-wallpaperengine --silent --no-fullscreen-pause --noautomute $screen_roots --assets-dir "$we_assets" "$we_id" &
+sleep 3
+for pid in $old_pids; do
+  kill -9 "\$pid" 2>/dev/null
+done
+INNEREOF
+chmod +x "$PIIXIDENT_RUNTIME/start-we.sh"
+nohup setsid "$PIIXIDENT_RUNTIME/start-we.sh" </dev/null >/dev/null 2>&1 &
+
+# Use WE preview image for matugen theming
+preview=$(find "$we_dir/$we_id" -maxdepth 1 -iname 'preview.*' -type f 2>/dev/null | head -1)
+if [ -n "$preview" ]; then
+  cp "$preview" "$wall_dir/wallpaper.jpg"
+  has_cmd matugen && matugen image -t "$matugen_scheme" "$preview"
+  "$(dirname "$0")/apply-niri-colors"
+  "$(dirname "$0")/generate-omp-theme"
+fi
+
+# Propagate color scheme to KDE, kitty, vscode, spicetify
+has_cmd kwriteconfig6 && kwriteconfig6 --file kdeglobals --group General --key ColorScheme "$kde_scheme"
+
+has_cmd gdbus && gdbus emit --session --object-path /kdeglobals --signal org.kde.kconfig.notify.ConfigChanged \
+  "{'General': [[byte 0x43, 0x6f, 0x6c, 0x6f, 0x72, 0x53, 0x63, 0x68, 0x65, 0x6d, 0x65]]}"
+
+pkill -USR1 kitty 2>/dev/null
+has_cmd vscode-reload-theme && vscode-reload-theme &
+has_cmd spicetify && spicetify refresh &>/dev/null &
+
+has_cmd notify-send && notify-send 'Wallpaper Engine' "Applied: $we_id"

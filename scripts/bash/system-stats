@@ -1,0 +1,79 @@
+#!/bin/bash
+# Polling system stats loop: CPU, memory, GPU, temps, storage (pipe-delimited output)
+
+. "$(dirname "$0")/lib.sh"
+
+# Poll intervals
+FAST=3
+SLOW=30
+GPU_VENDOR=$(detect_gpu)
+
+# Initial CPU sample for delta calculation
+read -r _ user nice system idle iowait irq softirq steal _ < /proc/stat
+prev_idle=$idle
+prev_total=$((user + nice + system + idle + iowait + irq + softirq + steal))
+sleep 0.5
+
+slow=0
+storage=""
+
+while true; do
+  # CPU usage from /proc/stat deltas
+  read -r _ user nice system idle iowait irq softirq steal _ < /proc/stat
+  total=$((user + nice + system + idle + iowait + irq + softirq + steal))
+  d_idle=$((idle - prev_idle))
+  d_total=$((total - prev_total))
+  prev_idle=$idle
+  prev_total=$total
+  [ "$d_total" -gt 0 ] && cpu=$(( (d_total - d_idle) * 100 / d_total )) || cpu=0
+
+  # Memory usage from /proc/meminfo
+  mem=$(awk '/MemTotal:/{t=$2} /MemAvailable:/{a=$2} END{printf "%d",(t-a)*100/t}' /proc/meminfo)
+
+  # GPU utilization and temperature (vendor-specific)
+  gpu=0; gt=0
+  case "$GPU_VENDOR" in
+    nvidia)
+      gpu_info=$(nvidia-smi --query-gpu=utilization.gpu,temperature.gpu --format=csv,noheader,nounits 2>/dev/null)
+      if [ -n "$gpu_info" ]; then
+        gpu=$(echo "$gpu_info" | cut -d',' -f1 | tr -d ' ')
+        gt=$(echo "$gpu_info" | cut -d',' -f2 | tr -d ' ')
+      fi
+      ;;
+    amd)
+      for card in /sys/class/drm/card*/device; do
+        [ -f "$card/gpu_busy_percent" ] && gpu=$(cat "$card/gpu_busy_percent" 2>/dev/null) && break
+      done
+      for hwmon in /sys/class/drm/card*/device/hwmon/hwmon*/temp1_input; do
+        [ -f "$hwmon" ] && gt=$(awk '{printf "%d",$1/1000}' "$hwmon") && break
+      done
+      ;;
+    intel)
+      for rc6 in /sys/class/drm/card*/gt/gt*/rc6_residency_ms; do
+        [ -f "$rc6" ] && break
+      done
+      ;;
+  esac
+
+  # CPU temperature from hwmon sensors
+  ct=0
+  for f in /sys/class/hwmon/hwmon*/temp1_input; do
+    [ -f "$f" ] || continue
+    lf="${f%_input}_label"
+    if [ -f "$lf" ]; then
+      case "$(cat "$lf" 2>/dev/null)" in
+        Tctl|Tdie|"Package id 0"|CPU*) ct=$(awk '{printf "%d",$1/1000}' "$f"); break ;;
+      esac
+    fi
+  done
+  [ "$ct" -eq 0 ] && [ -f /sys/class/thermal/thermal_zone0/temp ] && ct=$(awk '{printf "%d",$1/1000}' /sys/class/thermal/thermal_zone0/temp)
+
+  # Disk usage (refreshed every SLOW seconds)
+  if [ "$slow" -eq 0 ]; then
+    storage=$(df -h / | awk 'NR==2{printf "%s|%s|%s|%s",$5,$3,$2,$4}')
+  fi
+  slow=$(( (slow + FAST) % SLOW ))
+
+  echo "cpu:${cpu}|mem:${mem}|gpu:${gpu}|ct:${ct}|gt:${gt}|st:${storage}"
+  sleep "$FAST"
+done
