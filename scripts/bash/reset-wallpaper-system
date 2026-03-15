@@ -6,7 +6,9 @@ set -e
 
 # Delete all cached wallpaper files
 echo "Clearing all wallpaper caches and thumbnails..."
-find "$SKWD_CACHE/wallpaper" -type f -delete 2>/dev/null
+if [ -d "$SKWD_CACHE/wallpaper" ]; then
+  find "$SKWD_CACHE/wallpaper" -type f -delete
+fi
 
 echo " Caches cleared"
 echo ""
