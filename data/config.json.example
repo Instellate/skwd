@@ -2,7 +2,7 @@
   "_comment": "Main configuration for skwd. Copy this file to config.json and edit to match your setup.",
   "compositor": "niri",
   "paths": {
-    "scripts": "~/.config/skwd/scripts",
+    "scripts": "",
     "cache": "~/.cache/skwd",
     "wallpaper": "~/wallpaper",
     "steamWorkshop": "~/.local/share/Steam/steamapps/workshop/content/431960",
