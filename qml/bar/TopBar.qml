@@ -253,7 +253,7 @@ PanelWindow {
     // Center panel (lyrics island)
     LyricsIsland {
       id: lyricsIsland
-      visible: Config.musicEnabled
+      visible: Config.musicEnabled && (!Config.musicAutohide || (bar.activePlayer && bar.activePlayer.isPlaying))
       anchors.horizontalCenter: parent.horizontalCenter
       anchors.top: parent.top
       anchors.bottom: parent.bottom

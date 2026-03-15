@@ -14,17 +14,27 @@ fi
 
 mkdir -p "$(dirname "$OUTPUT")"
 
-# Extract color values via Python
-primary=$(python3 -c "import json; print(json.load(open('$COLORS'))['primary'])")
-on_primary=$(python3 -c "import json; print(json.load(open('$COLORS'))['primaryText'])")
-tertiary=$(python3 -c "import json; print(json.load(open('$COLORS'))['tertiary'])")
-on_tertiary=$(python3 -c "import json; print(json.load(open('$COLORS'))['tertiaryText'])")
-surface=$(python3 -c "import json; print(json.load(open('$COLORS'))['surface'])")
-surface_variant=$(python3 -c "import json; print(json.load(open('$COLORS'))['surfaceVariant'])")
-on_surface_variant=$(python3 -c "import json; print(json.load(open('$COLORS'))['surfaceVariantText'])")
-error=$(python3 -c "import json; print(json.load(open('$COLORS'))['error'])")
-on_error=$(python3 -c "import json; print(json.load(open('$COLORS'))['errorText'])")
-outline=$(python3 -c "import json; print(json.load(open('$COLORS'))['outline'])")
+eval "$(python3 -c "
+import json, sys
+d = json.load(open('$COLORS'))
+for k, v in {
+    'primary': 'primary',
+    'on_primary': 'primaryText',
+    'primary_container': 'primaryContainer',
+    'on_primary_container': 'primaryContainerText',
+    'tertiary': 'tertiary',
+    'on_tertiary': 'tertiaryText',
+    'tertiary_container': 'tertiaryContainer',
+    'on_tertiary_container': 'tertiaryContainerText',
+    'surface': 'surface',
+    'surface_variant': 'surfaceVariant',
+    'on_surface_variant': 'surfaceVariantText',
+    'error': 'error',
+    'on_error': 'errorText',
+    'outline': 'outline',
+}.items():
+    print(f'{k}=\"{d.get(v, \"#000000\")}\"')
+")"
 
 # Write omp theme with powerline segments (path, git, status, time)
 cat > "$OUTPUT" << THEME
@@ -36,8 +46,12 @@ cat > "$OUTPUT" << THEME
   "palette": {
     "primary": "${primary}",
     "on-primary": "${on_primary}",
+    "primary-container": "${primary_container}",
+    "on-primary-container": "${on_primary_container}",
     "tertiary": "${tertiary}",
     "on-tertiary": "${on_tertiary}",
+    "tertiary-container": "${tertiary_container}",
+    "on-tertiary-container": "${on_tertiary_container}",
     "surface": "${surface}",
     "surface-variant": "${surface_variant}",
     "on-surface-variant": "${on_surface_variant}",
@@ -51,11 +65,19 @@ cat > "$OUTPUT" << THEME
       "alignment": "left",
       "segments": [
         {
-          "type": "path",
+          "type": "time",
           "style": "powerline",
           "powerline_symbol": "\ue0b8",
           "foreground": "p:on-primary",
           "background": "p:primary",
+          "template": " {{ .CurrentDate | date \"15:04\" }} "
+        },
+        {
+          "type": "path",
+          "style": "powerline",
+          "powerline_symbol": "\ue0b8",
+          "foreground": "p:on-tertiary",
+          "background": "p:tertiary",
           "template": " \uf413 {{ .Path }} ",
           "properties": {
             "style": "agnoster_short",
@@ -66,8 +88,8 @@ cat > "$OUTPUT" << THEME
           "type": "git",
           "style": "powerline",
           "powerline_symbol": "\ue0b8",
-          "foreground": "p:on-tertiary",
-          "background": "p:tertiary",
+          "foreground": "p:on-primary",
+          "background": "p:primary",
           "template": " \ue0a0 {{ .HEAD }}{{ if .Working.Changed }} \uf044 {{ .Working.String }}{{ end }}{{ if .Staging.Changed }} \uf046 {{ .Staging.String }}{{ end }} ",
           "properties": {
             "branch_icon": "",
@@ -102,15 +124,6 @@ cat > "$OUTPUT" << THEME
             "threshold": 2000,
             "style": "roundrock"
           }
-        },
-        {
-          "type": "time",
-          "style": "powerline",
-          "powerline_symbol": "\ue0ba",
-          "invert_powerline": true,
-          "foreground": "p:on-primary",
-          "background": "p:primary",
-          "template": " {{ .CurrentDate | date \"15:04\" }} "
         }
       ]
     },

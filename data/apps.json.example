@@ -1,17 +1,17 @@
 {
   "_comment": "App customization for the launcher and window switcher. Each key is matched case-insensitively against the .desktop Name field.",
-  "_usage": "Each value is an object with optional fields: background (image path), icon (nerd font glyph), displayName (custom name shown in UI), hidden (true to hide from launcher/switcher), tags (space-separated searchable tags).",
+  "_usage": "Each value is an object with optional fields: background (image path), icon (nerd font glyph), displayName (custom name shown in UI), hidden (true to hide from launcher), tags (space-separated searchable tags).",
   "_fields": {
     "background": "Absolute path to a background image shown behind the app in the launcher",
     "icon": "Nerd Font glyph to override the default app icon",
-    "displayName": "Custom display name shown in the UI instead of the .desktop Name",
-    "hidden": "Set to true to hide the app from the launcher",
-    "tags": "Space-separated keywords for search (e.g. \"chat voice call\")"
+    "displayName": "Custom display name shown in the UI instead of the .desktop name. Useful if you use custom software like Vesktop instead of Discord",
+    "hidden": "Set to true to hide the app from the launcher. Good for software you launch through keybinds or other stuff.",
+    "tags": "Space-separated keywords for search (e.g. \"chat voice call\". Also good for custom software that replaces the one you usually type. e.g. Vesktop -> Discord)"
   },
   "discord": {
     "background": "~/.config/piixident/images/apps/discord.webp",
     "icon": "󰙯",
-    "displayName": "Totally Not Discord Trust Me Bro",
+    "displayName": "Totally Not Discord",
     "tags": "chat voice call kitten"
   },
   "firefox": {

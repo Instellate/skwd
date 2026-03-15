@@ -16,7 +16,10 @@ QtObject {
         path: colors.colorFilePath
         watchChanges: true
         preload: true
-        onFileChanged: colors._applyColors()
+        onFileChanged: {
+            colorFileView.reload()
+            colors._applyColors()
+        }
     }
 
     // JSON parsing and color assignment

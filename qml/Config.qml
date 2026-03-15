@@ -70,6 +70,7 @@ QtObject {
     readonly property string visualizerTheme: _bar.music?.visualizer ?? "wave"
     readonly property bool visualizerTop: (_bar.music?.visualizerTop !== false)
     readonly property bool visualizerBottom: (_bar.music?.visualizerBottom !== false)
+    readonly property bool musicAutohide: (_bar.music?.autohide !== false)
 
     // Standalone component enable/disable flags
     property var _components: _data.components ?? {}
