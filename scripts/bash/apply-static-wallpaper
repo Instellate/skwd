@@ -33,7 +33,7 @@ nohup setsid "$SKWD_RUNTIME/start-awww.sh" </dev/null >/dev/null 2>&1 &
 if [ "$(realpath "$wall_path")" != "$(realpath "$wall_dir/wallpaper.jpg")" ]; then
   cp "$wall_path" "$wall_dir/wallpaper.jpg"
 fi
-has_cmd matugen && matugen -c "$SKWD_MATUGEN_CONFIG" image -t "$matugen_scheme" "$wall_path"
+has_cmd matugen && matugen -c "$SKWD_MATUGEN_CONFIG" image -t "$matugen_scheme" --source-color-index 0 "$wall_path"
 "$(dirname "$0")/apply-niri-colors"
 "$(dirname "$0")/generate-omp-theme"
 
