@@ -1,13 +1,13 @@
-# Maintainer: liixini <https://github.com/liixini>
-pkgname=skwd-git
+# Maintainer: Instellate
+pkgname=skwd-inst-git
 pkgver=r23.e485c2e
 pkgrel=1
 pkgdesc="A skewed take on desktop shells - Quickshell/QML desktop environment"
 arch=('any')
-url="https://github.com/liixini/skwd"
+url="https://github.com/Instellate/skwd"
 license=('MIT')
 depends=(
-  'quickshell-git'
+  'quickshell'
   'qt6-base'
   'qt6-connectivity'
   'qt6-multimedia'

@@ -154,7 +154,7 @@ QtObject {
     if (appName) recordSelection(appName)
     var cmd = appExec
     if (isTerminal) cmd = service.terminal + " " + cmd
-    _appRunner.command = ["setsid", "-f", "sh", "-c", cmd]
+    _appRunner.command = ["systemd-run", "--user", "sh", "-c", cmd]
     _appRunner.running = true
   }
 

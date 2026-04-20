@@ -292,7 +292,14 @@ Scope {
                 appLauncher.showing = false
               }
             }
-            Keys.onEscapePressed: appLauncher.showing = false
+            Keys.onEscapePressed: {
+              if (searchInput.focus) {
+                searchInput.focus = false;
+                sliceListView.forceActiveFocus();
+              } else {
+                appLauncher.showing = false;
+              }
+            }
 
             Text {
               anchors.fill: parent
