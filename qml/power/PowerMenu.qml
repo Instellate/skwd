@@ -28,7 +28,7 @@ Scope {
   property int selectedIndex: 0
 
 
-  property string iconFont: "Font Awesome 7 Free Solid"
+  property string iconFont: "Symbols Nerd Font"
 
 
   // Action-to-command mapping
